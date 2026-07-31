@@ -29,8 +29,8 @@ pub enum Commands {
 #[derive(Debug, Args, Clone)]
 pub struct RpcArgs {
     /// RPC endpoint, for example http://127.0.0.1:8332
-    #[arg(long, default_value = "http://127.0.0.1:8332")]
-    pub rpc_url: String,
+    #[arg(long)]
+    pub rpc_url: Option<String>,
 
     /// RPC username for user/pass auth.
     #[arg(long)]
@@ -93,9 +93,50 @@ pub fn rpc_auth(args: &RpcArgs) -> Result<Auth> {
     match (&args.rpc_user, &args.rpc_password) {
         (Some(user), Some(password)) => Ok(Auth::UserPass(user.clone(), password.clone())),
         _ => Err(anyhow::anyhow!(
-            "provide either --cookie-file or both --rpc-user and --rpc-password"
+            "provide --cookie-file, both --rpc-user and --rpc-password, or use auto-detect"
         )),
     }
+}
+
+fn default_cookie_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        let bitcoin = home.join(".bitcoin");
+        paths.extend([
+            bitcoin.join(".cookie"),
+            bitcoin.join("testnet3").join(".cookie"),
+            bitcoin.join("testnet4").join(".cookie"),
+            bitcoin.join("signet").join(".cookie"),
+            bitcoin.join("regtest").join(".cookie"),
+        ]);
+
+        if cfg!(target_os = "macos") {
+            let app_support = home.join("Library").join("Application Support").join("Bitcoin");
+            paths.extend([
+                app_support.join(".cookie"),
+                app_support.join("testnet3").join(".cookie"),
+                app_support.join("testnet4").join(".cookie"),
+                app_support.join("signet").join(".cookie"),
+                app_support.join("regtest").join(".cookie"),
+            ]);
+        }
+    }
+
+    paths
+}
+
+fn default_rpc_urls() -> Vec<String> {
+    [
+        "http://127.0.0.1:8332",
+        "http://127.0.0.1:18332",
+        "http://127.0.0.1:38332",
+        "http://127.0.0.1:18443",
+        "http://127.0.0.1:48332",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
 }
 
 pub fn detect_network(client: &Client) -> Result<NetworkKind> { detect_network_with_override(client, None) }
@@ -146,14 +187,41 @@ pub fn kill_process(pid: u32, force: bool) -> Result<()> {
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::DetectNetwork(args) => {
-            let client = Client::new(&args.rpc_url, rpc_auth(&args)?)
-                .with_context(|| format!("failed to connect to {}", args.rpc_url))?;
-            let network = detect_network_with_override(&client, args.signet_challenge.as_deref())?;
+            let network = if let Some(rpc_url) = &args.rpc_url {
+                let client = Client::new(rpc_url, rpc_auth(&args)?)
+                    .with_context(|| format!("failed to connect to {rpc_url}"))?;
+                detect_network_with_override(&client, args.signet_challenge.as_deref())?
+            } else {
+                detect_network_auto(args.signet_challenge.as_deref())?
+            };
             println!("{network}");
             Ok(())
         }
         Commands::Kill(args) => kill_process(args.pid, args.force),
     }
+}
+
+pub fn detect_network_auto(signet_challenge: Option<&str>) -> Result<NetworkKind> {
+    let cookies = default_cookie_paths();
+    let urls = default_rpc_urls();
+
+    for rpc_url in urls {
+        for cookie in &cookies {
+            if !cookie.exists() {
+                continue;
+            }
+
+            if let Ok(client) = Client::new(&rpc_url, Auth::CookieFile(cookie.clone())) {
+                if let Ok(network) = detect_network_with_override(&client, signet_challenge) {
+                    return Ok(network);
+                }
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "could not auto-detect a local Bitcoin Core node; pass --rpc-url and auth flags explicitly"
+    ))
 }
 
 #[cfg(test)]
