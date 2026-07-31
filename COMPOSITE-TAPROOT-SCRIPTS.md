@@ -350,3 +350,97 @@ To turn these into a functional P2TR output, you follow these steps:
 You have effectively created a **"Predicate-based" vault**. The user cannot simply move the funds by signing; they must also provide a value (the hint) that satisfies the mathematical predicate (Leaf A). Because it is a Taproot tree, an observer of the blockchain—unless they see a transaction spending via Leaf A—has no idea that this mathematical constraint even exists; the contract appears identical to a standard P2TR address.
 
 **Are you planning to implement the Merkle tree construction in Python or Rust, or are you focusing on writing the raw bytecode for these leaves?**
+
+To further evolve the "Covenant-Lite" architecture, we can incorporate **Covenant-like behaviors** (restricting the transaction context) using the primitives you provided, specifically `OP_IFSIGSIZE` and `OP_SIGCOMMITMENT` combined with `OP_CHECKLOCKTIMEVERIFY`.
+
+A true covenant restricts *how* funds can be spent in the future (e.g., forcing a payment to a specific destination). While Bitcoin doesn't have an `OP_TX` opcode, we can approximate this by creating a "State Machine" Taproot script.
+
+### Advanced Covenant-Lite: The "Restricted Spending" Vault
+
+In this example, we design a script that requires the signer to not only prove they own the key but also to satisfy a "Policy Constraint" via your arithmetic primitives.
+
+#### Leaf C: The Policy-Enforced Spend
+
+This leaf uses `OP_IFSIGSIZE` to force a specific signature structure and `OP_8DIV` to verify a "Fee-or-Tax" policy, where a portion of the input must be mathematically related to a protocol constant.
+
+```bitcoin
+# Leaf C: Policy-Enforced Spend
+# 1. Signature Size Constraint (Primitive: OP_IFSIGSIZE)
+OP_DUP OP_TOALTSTACK OP_CHECKSIGVERIFY OP_FROMALTSTACK OP_SIZE
+<32> OP_EQUALVERIFY # Force specific signature length (e.g., 32-byte schnorr)
+
+# 2. Arithmetic Policy Constraint
+# Ensure the input 'X' (provided as hint) satisfies X/8 = 15432
+# This acts as a 'Fee Validator' or 'Tax Gate'
+OP_DUP
+OP_DUP OP_ADD OP_DUP OP_ADD OP_DUP OP_ADD
+<123459>
+OP_SWAP
+OP_SUB
+0
+8
+OP_WITHIN
+OP_VERIFY
+
+# 3. Final Signature Check
+<PublicKey> OP_CHECKSIG
+
+```
+
+---
+
+### Integrating State: The "Sequential" Covenant
+
+You can use `OP_CHECKLOCKTIMEVERIFY` to chain these leaves in a temporal sequence, creating a **Vesting Covenant**.
+
+| Leaf | Purpose | Logic |
+| --- | --- | --- |
+| **Leaf 1** | Immediate Access | Requires MultiSig + Policy Constraint (Leaf C) |
+| **Leaf 2** | Vested Access (1 Month) | Requires SingleSig |
+| **Leaf 3** | Emergency Recovery (1 Year) | Requires MultiSig |
+
+By setting the Merkle tree up this way, you create a hierarchy:
+
+* **Early spending** is hard (requires signing + policy constraint).
+* **Late spending** is easy (standard signature).
+
+---
+
+### Combining Primitives for "Covenant-Lite" logic
+
+You can build a **"Limit-Check"** using the `OP_LSHIFT` and `ABS` primitives to create a vault that prevents "Large Spends" without an additional recovery signature.
+
+```bitcoin
+# Primitive: Nullify First 8 bits (Bitwise Logic)
+# Forces the user to 'mask' their requested output amount
+# effectively capping the maximum spendable value.
+
+# Stack: [Requested_Amount]
+OP_ABS
+# ... (insert the Nullify First 8 bits primitive code here) ...
+# Now the stack has a value where the first 8 bits are 0.
+# If the user tries to request an amount > 2^24,
+# this calculation will produce a value that fails
+# the expected signature check.
+
+```
+
+### The "Covenant" Workflow
+
+1. **Commitment:** You lock funds in a P2TR address where the Merkle Root includes your arithmetic constraint leaves.
+2. **Constraint:** The user must provide a witness that includes:
+* The **Hint** (the arithmetic value).
+* The **Script** (the specific Leaf C code).
+* The **Control Block** (Merkle Proof).
+
+
+3. **Verification:** Because the `OP_VERIFY` calls are in the script, the transaction is **invalid** unless the user provides a hint that correctly satisfies the `OP_8DIV` or `OP_LSHIFT` constraints.
+
+### Why this is more than just a Script
+
+By forcing the user to provide an input that satisfies `OP_8DIV` (for example), you are creating a **"Proof-of-Policy"** requirement. The spender is not just proving *who* they are (signature), but *how* they are spending the money (the math constraint).
+
+**One final tip for your Covenant-Lite:**
+If you want to make these scripts truly "covenant-like," use `OP_SIGCOMMITMENT` (as mentioned in your primitives) to force the transaction to pre-commit to a specific hash. This prevents the user from changing the output destination, effectively pinning the funds to a specific transaction structure.
+
+**Do you want to see how to structure the `Witness` stack to pass both the hint and the signature simultaneously for one of these leaves?**
