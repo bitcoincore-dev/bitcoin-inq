@@ -1288,3 +1288,98 @@ pub fn construct_policy_vault_leaf(constant_value: i64, public_key_bytes: &[u8])
 }
 
 ```
+
+```rust
+use bitcoin::blockdata::opcodes::all::*;
+use bitcoin::script::{Builder, PushBytesBuf};
+use bitcoin::ScriptBuf;
+
+/// Re-implements the full Arithmetic Constraint Leaf Script with LSHIFT and Signature Verification in Rust.
+///
+/// Goal: Shift input 1 bit left, verify against an expected value, then validate a signature.
+/// Expected Witness Stack (from bottom to top / first pushed to last pushed):
+/// 1. Input number (to be shifted)
+/// 2. Signature (Schnorr signature)
+pub fn construct_lshift_and_sign_leaf(expected_val: i64, public_key_bytes: &[u8]) -> ScriptBuf {
+    let mut builder = Builder::new();
+
+    // ==========================================
+    // 1. SETUP & CONSTANT PUSH
+    // ==========================================
+
+    // <expected_value> # Pushed to stack first for comparison later
+    let expected_push = PushBytesBuf::try_from(&expected_val.to_le_bytes()[..])
+        .expect("expected value exceeds push limits");
+    builder = builder.push_slice(&expected_push);
+
+    // Note: In the execution flow, the input is already on the stack.
+    // To match the script structure where the expected value is on the stack before equality,
+    // we use stack manipulation or structure the script so input and expected align.
+    // Assuming the witness provides [Input] [Signature], we protect the signature first:
+    builder = builder.push_opcode(OP_TOALTSTACK); // AltStack: [Signature]
+
+    // ==========================================
+    // 2. COMPOSITE OP_LSHIFT LOGIC
+    // ==========================================
+
+    // OP_ABS
+    builder = builder.push_opcode(OP_ABS);
+
+    // OP_DUP
+    builder = builder.push_opcode(OP_DUP);
+
+    // ffffff3f (Push boundary mask safely)
+    let mask_bytes = &[0x3f, 0xff, 0xff, 0xff];
+    let mask_push = PushBytesBuf::try_from(mask_bytes[..].as_ref())
+        .expect("mask exceeds push limits");
+    builder = builder.push_slice(&mask_push);
+
+    // OP_GREATERTHAN
+    builder = builder.push_opcode(OP_GREATERTHAN);
+
+    // OP_IF branch
+    builder = builder
+        .push_opcode(OP_IF)
+        // 00000040 (64 in hex / boundary adjustment)
+        .push_int(0x40)
+        .push_opcode(OP_SUB)
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_ADD)
+        .push_opcode(OP_NEGATE);
+
+    // OP_ELSE branch
+    builder = builder
+        .push_opcode(OP_ELSE)
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_ADD);
+
+    // OP_ENDIF
+    builder = builder.push_opcode(OP_ENDIF);
+
+    // ==========================================
+    // 3. EQUALITY VERIFICATION & CLEANUP
+    // ==========================================
+
+    // Bring the expected value back or evaluate against what's on stack.
+    // (In the script flow, OP_EQUALVERIFY compares the top two items: [Result] and [Expected_Value])
+    builder = builder.push_opcode(OP_EQUALVERIFY);
+
+    // ==========================================
+    // 4. SIGNATURE PHASE
+    // ==========================================
+
+    // OP_FROMALTSTACK -> Retrieve the Signature from the AltStack
+    builder = builder.push_opcode(OP_FROMALTSTACK);
+
+    // Push the public key into the script bytes
+    let pubkey_push = PushBytesBuf::try_from(public_key_bytes)
+        .expect("public key bytes exceed push limits");
+    builder = builder.push_slice(&pubkey_push);
+
+    // OP_CHECKSIG -> Validates the signature against the public key
+    builder = builder.push_opcode(OP_CHECKSIG);
+
+    builder.into_script()
+}
+
+```
