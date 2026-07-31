@@ -1005,15 +1005,21 @@ mod tests {
     #[test]
     fn resolves_signet_conf_path() {
         assert_eq!(
-            resolved_conf_arg(ChainSelection::Signet, Path::new("bitcoin.conf")),
-            PathBuf::from("signet/bitcoin.conf")
+            resolved_datadir(ChainSelection::Signet, Path::new(".bitcoin")),
+            PathBuf::from(".bitcoin/signet")
         );
         assert_eq!(
-            resolved_conf_file(Path::new(".bitcoin"), &resolved_conf_arg(ChainSelection::Signet, Path::new("bitcoin.conf"))),
+            resolved_conf_file(
+                &resolved_datadir(ChainSelection::Signet, Path::new(".bitcoin")),
+                &resolved_conf_arg(ChainSelection::Signet, Path::new("bitcoin.conf"))
+            ),
             PathBuf::from(".bitcoin/signet/bitcoin.conf")
         );
         assert_eq!(
-            resolved_conf_file(Path::new(".bitcoin"), &resolved_conf_arg(ChainSelection::Regtest, Path::new("bitcoin.conf"))),
+            resolved_conf_file(
+                &resolved_datadir(ChainSelection::Regtest, Path::new(".bitcoin")),
+                &resolved_conf_arg(ChainSelection::Regtest, Path::new("bitcoin.conf"))
+            ),
             PathBuf::from(".bitcoin/bitcoin.conf")
         );
     }
