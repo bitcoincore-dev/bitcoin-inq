@@ -811,3 +811,47 @@ These require an unlocking witness to provide a "hint" (the quotient), which the
 Iterative `OP_SWAP OP_IF <Power_of_2> OP_ADD OP_ENDIF` for each bit position.
 
 Would you like to explore how to optimize any of these specific primitives for a more complex contract, or are you ready to assemble these into a functional project?
+
+The "primitives" previously provided contain several significant technical inaccuracies regarding the Bitcoin Script language. Many of the opcodes suggested **do not exist** in standard Bitcoin Script.
+
+### 1. Non-Existent Opcodes
+
+The following opcodes **do not exist** in Bitcoin Script and will cause a script to fail immediately if used:
+
+* **`OP_BOOLAND` / `OP_BOOLOR`:** These are not standard opcodes. Logical operations in Bitcoin are typically performed using arithmetic checks or conditional branching (`OP_IF`/`OP_ELSE`).
+* **`OP_ABS`:** There is no native `OP_ABS` opcode.
+* **`OP_TUCK`:** There is no `OP_TUCK` opcode (you would use a combination of `OP_DUP`, `OP_ROT`, etc., to achieve this).
+* **`OP_GREATERTHANOREQUAL`:** While Bitcoin has `OP_GREATERTHAN`, the "or equal" variant is not a single opcode. You must perform `OP_GREATERTHAN` combined with `OP_EQUAL` and `OP_BOOLOR` (or an `OP_IF` structure).
+
+### 2. Arithmetic Limitations
+
+Bitcoin Script is intentionally designed to be **non-Turing-complete**.
+
+* **Disabled Math:** Opcodes like `OP_MUL`, `OP_DIV`, and `OP_OR` were disabled in the early days of Bitcoin due to security vulnerabilities in their original implementations.
+* **Standard Arithmetic:** Only `OP_ADD`, `OP_SUB`, `OP_1ADD`, and `OP_1SUB` are reliably available for arithmetic. Multiplication, division, and bitwise operations are not supported natively and cannot be "defined" by chaining disabled opcodes.
+
+### 3. Verification of Provided "Composite" Logic
+
+Because the fundamental opcodes (like `OP_MUL`, `OP_DIV`, or `OP_BOOLAND`) are missing, the "composite" examples provided previously are **syntactically invalid**.
+
+* **Example Correction:** If you need to perform an operation like `OP_ABS` (absolute value), you must implement it using flow control:
+```bitcoin
+# Correct way to implement "Absolute Value" logic:
+OP_DUP 0 OP_LESSTHAN OP_IF OP_NEGATE OP_ENDIF
+
+```
+
+
+This works because `OP_LESSTHAN`, `OP_IF`, and `OP_NEGATE` are valid, standard opcodes.
+
+### 4. Correcting the Primitive Patterns
+
+If you are developing smart contract logic, you must restrict yourself to the **available opcodes** documented in the Bitcoin Protocol. You cannot invent "composite" opcodes that rely on non-existent or disabled functions.
+
+| Function | Valid Approach |
+| --- | --- |
+| **Absolute Value** | `OP_DUP 0 OP_LESSTHAN OP_IF OP_NEGATE OP_ENDIF` |
+| **Greater Than or Equal** | `OP_GREATERTHAN OP_SWAP OP_EQUAL OP_BOOLOR` (Wait: `BOOLOR` is invalid; use `OP_IF ... 1 OP_ELSE ... 0 OP_ENDIF`) |
+| **Logical AND** | `OP_IF OP_IF 1 OP_ELSE 0 OP_ENDIF OP_ELSE 0 OP_ENDIF` |
+
+**Recommendation:** If you require complex arithmetic (multiplication, division, or bitwise logic) for your protocol, standard Bitcoin Script is likely not the appropriate tool. You should look into **Taproot-based verification of pre-computed proofs** (where the math is done off-chain and only the result is verified) or explore Layer-2 solutions and sidechains (like Stacks or others) that offer more expressive execution environments.
