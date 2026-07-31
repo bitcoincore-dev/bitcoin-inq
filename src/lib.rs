@@ -74,9 +74,13 @@ pub struct InquisitionArgs {
     #[arg(long, num_args = 0..=1, default_missing_value = "empty")]
     pub install: Option<String>,
 
+    /// Overwrite an existing downloaded asset.
+    #[arg(short = 'f', long)]
+    pub force: bool,
+
     /// Destination directory for the downloaded release asset.
-    #[arg(long)]
-    pub dir: Option<PathBuf>,
+    #[arg(long, default_value = ".")]
+    pub dir: PathBuf,
 
     /// Print the chosen release and asset instead of downloading.
     #[arg(long, default_value_t = false)]
@@ -538,23 +542,19 @@ fn curl_download(url: &str, file: &Path) -> Result<()> {
     }
 }
 
-pub fn install_inquisition(version: Option<&str>, dir: Option<&Path>, dry_run: bool) -> Result<PathBuf> {
+pub fn install_inquisition(version: Option<&str>, dir: &Path, force: bool, dry_run: bool) -> Result<PathBuf> {
     let releases = fetch_release_list()?;
 
     if is_version_list_request(version) {
         for release in &releases {
             println!("{}", release.tag_name);
         }
-        return Ok(dir
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))));
+        return Ok(dir.to_path_buf());
     }
 
     let tag = resolve_release_tag(version, &releases)?;
     let asset_name = inquisition_asset_name(&tag)?;
-    let target_dir = dir
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let target_dir = dir.to_path_buf();
 
     let release = releases
         .iter()
@@ -566,20 +566,23 @@ pub fn install_inquisition(version: Option<&str>, dir: Option<&Path>, dry_run: b
         .iter()
         .find(|asset| asset.name == asset_name)
         .ok_or_else(|| anyhow::anyhow!("no matching asset found for {asset_name}"))?;
+    let target_file = target_dir.join(&asset.name);
 
     if dry_run {
         println!("{tag} {}", asset.name);
-        return Ok(target_dir.join(&asset.name));
+        return Ok(target_file);
     }
 
     std::fs::create_dir_all(&target_dir).context("failed to create install directory")?;
+    if force && target_file.exists() {
+        std::fs::remove_file(&target_file).context("failed to remove existing asset")?;
+    }
 
     if gh_exists() {
         gh_release_download(&tag, &asset.name, &target_dir)
     } else {
-        let file = target_dir.join(&asset.name);
-        curl_download(&asset.browser_download_url, &file)?;
-        Ok(file)
+        curl_download(&asset.browser_download_url, &target_file)?;
+        Ok(target_file)
     }
 }
 
@@ -673,7 +676,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Commands::Inquisition(args) => {
             let dry_run = args.dry_run;
-            let path = install_inquisition(args.install.as_deref(), args.dir.as_deref(), dry_run)?;
+            let path = install_inquisition(args.install.as_deref(), &args.dir, args.force, dry_run)?;
             if !dry_run && !is_version_list_request(args.install.as_deref()) {
                 println!("{}", path.display());
             }
