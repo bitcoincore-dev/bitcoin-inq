@@ -4,6 +4,7 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum SignalKind {
@@ -43,6 +44,8 @@ pub struct Cli {
 pub enum Commands {
     /// Start a local Bitcoin Core node.
     Node(NodeArgs),
+    /// Install Bitcoin Inquisition release assets.
+    Inquisition(InquisitionArgs),
     /// Detect the chain the local Bitcoin Core node is running on.
     DetectNetwork(RpcArgs),
     /// Kill a process by PID.
@@ -59,6 +62,21 @@ pub enum NodeCommands {
 pub struct NodeArgs {
     #[command(subcommand)]
     pub command: NodeCommands,
+}
+
+#[derive(Debug, Args)]
+pub struct InquisitionArgs {
+    /// Install the given release tag or version (for example v29.4-inq or 29.4-inq).
+    #[arg(long)]
+    pub install: Option<String>,
+
+    /// Destination directory for the downloaded release asset.
+    #[arg(long)]
+    pub dir: Option<PathBuf>,
+
+    /// Print the chosen release and asset instead of downloading.
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -272,6 +290,167 @@ fn is_executable(path: &Path) -> bool {
     path.is_file()
 }
 
+#[derive(Debug, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    #[serde(default)]
+    is_latest: bool,
+    assets: Vec<GitHubAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+fn gh_exists() -> bool {
+    find_executable(&["gh"]).is_some()
+}
+
+fn fetch_release_list() -> Result<Vec<GitHubRelease>> {
+    let output = if gh_exists() {
+        Command::new("gh")
+            .args(["api", "repos/bitcoin-inquisition/bitcoin/releases?per_page=100"])
+            .output()
+            .context("failed to invoke gh")?
+    } else {
+        Command::new("curl")
+            .args([
+                "-fsSL",
+                "https://api.github.com/repos/bitcoin-inquisition/bitcoin/releases?per_page=100",
+            ])
+            .output()
+            .context("failed to invoke curl")?
+    };
+
+    if !output.status.success() {
+        return Err(anyhow::anyhow!("failed to fetch Inquisition release list"));
+    }
+
+    Ok(serde_json::from_slice(&output.stdout).context("failed to parse release list")?)
+}
+
+fn normalize_tag(tag: &str) -> String {
+    tag.strip_prefix('v').unwrap_or(tag).to_owned()
+}
+
+fn resolve_release_tag(requested: Option<&str>, releases: &[GitHubRelease]) -> Result<String> {
+    if let Some(requested) = requested {
+        if requested == "latest" {
+            return releases
+                .iter()
+                .find(|release| release.is_latest)
+                .map(|release| release.tag_name.clone())
+                .ok_or_else(|| anyhow::anyhow!("could not determine latest Inquisition release"));
+        }
+
+        if let Some(release) = releases.iter().find(|release| {
+            release.tag_name == requested
+                || normalize_tag(&release.tag_name) == requested
+                || release.tag_name == format!("v{requested}")
+        }) {
+            return Ok(release.tag_name.clone());
+        }
+
+        return Err(anyhow::anyhow!(
+            "unknown Inquisition release tag: {requested}"
+        ));
+    }
+
+    releases
+        .iter()
+        .find(|release| release.is_latest)
+        .map(|release| release.tag_name.clone())
+        .ok_or_else(|| anyhow::anyhow!("could not determine latest Inquisition release"))
+}
+
+fn inquisition_asset_name(tag: &str) -> Result<String> {
+    let version = normalize_tag(tag);
+    let suffix = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "x86_64-linux-gnu.tar.gz",
+        ("linux", "aarch64") => "aarch64-linux-gnu.tar.gz",
+        ("macos", "x86_64") => "x86_64-apple-darwin-unsigned.tar.gz",
+        ("macos", "aarch64") | ("macos", "arm64") => "arm64-apple-darwin-unsigned.tar.gz",
+        ("windows", "x86_64") => "win64-codesigning.tar.gz",
+        _ => return Err(anyhow::anyhow!("unsupported platform for Inquisition release assets")),
+    };
+
+    Ok(format!("bitcoin-{version}-{suffix}"))
+}
+
+fn gh_release_download(tag: &str, asset_name: &str, dir: &Path) -> Result<PathBuf> {
+    let status = Command::new("gh")
+        .args([
+            "release",
+            "download",
+            tag,
+            "--repo",
+            "bitcoin-inquisition/bitcoin",
+            "--pattern",
+            asset_name,
+            "--dir",
+        ])
+        .arg(dir)
+        .status()
+        .context("failed to invoke gh release download")?;
+
+    if !status.success() {
+        return Err(anyhow::anyhow!("gh release download failed"));
+    }
+
+    Ok(dir.join(asset_name))
+}
+
+fn curl_download(url: &str, file: &Path) -> Result<()> {
+    let status = Command::new("curl")
+        .args(["-fL", url, "-o"])
+        .arg(file)
+        .status()
+        .context("failed to invoke curl")?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("curl download failed"))
+    }
+}
+
+pub fn install_inquisition(version: Option<&str>, dir: Option<&Path>, dry_run: bool) -> Result<PathBuf> {
+    let releases = fetch_release_list()?;
+    let tag = resolve_release_tag(version, &releases)?;
+    let asset_name = inquisition_asset_name(&tag)?;
+    let target_dir = dir
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    let release = releases
+        .iter()
+        .find(|release| release.tag_name == tag)
+        .ok_or_else(|| anyhow::anyhow!("release metadata missing for {tag}"))?;
+
+    let asset = release
+        .assets
+        .iter()
+        .find(|asset| asset.name == asset_name)
+        .ok_or_else(|| anyhow::anyhow!("no matching asset found for {asset_name}"))?;
+
+    if dry_run {
+        println!("{tag} {}", asset.name);
+        return Ok(target_dir.join(&asset.name));
+    }
+
+    std::fs::create_dir_all(&target_dir).context("failed to create install directory")?;
+
+    if gh_exists() {
+        gh_release_download(&tag, &asset.name, &target_dir)
+    } else {
+        let file = target_dir.join(&asset.name);
+        curl_download(&asset.browser_download_url, &file)?;
+        Ok(file)
+    }
+}
+
 pub fn start_node(args: NodeStartArgs) -> Result<()> {
     if args.chain != ChainSelection::Signet && args.signetchallenge.is_some() {
         return Err(anyhow::anyhow!(
@@ -321,6 +500,14 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Node(node) => match node.command {
             NodeCommands::Start(args) => start_node(args),
         },
+        Commands::Inquisition(args) => {
+            let dry_run = args.dry_run;
+            let path = install_inquisition(args.install.as_deref(), args.dir.as_deref(), dry_run)?;
+            if !dry_run {
+                println!("{}", path.display());
+            }
+            Ok(())
+        }
         Commands::DetectNetwork(args) => {
             let network = if let Some(rpc_url) = &args.rpc_url {
                 let client = Client::new(rpc_url, rpc_auth(&args)?)
@@ -367,5 +554,11 @@ mod tests {
     fn displays_network_names() {
         assert_eq!(NetworkKind::Mainnet.to_string(), "mainnet");
         assert_eq!(NetworkKind::CustomSignet.to_string(), "custom signet");
+    }
+
+    #[test]
+    fn normalizes_release_tags() {
+        assert_eq!(normalize_tag("v29.4-inq"), "29.4-inq");
+        assert_eq!(normalize_tag("29.4-inq"), "29.4-inq");
     }
 }
