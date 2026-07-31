@@ -390,12 +390,12 @@ pub fn list_processes(name: Option<&str>, contains: bool) -> Result<Vec<ProcessI
 }
 
 pub fn bitcoind_binary() -> Result<PathBuf> {
-    find_executable(&["bitcoind", "bitcoind.exe", "Bitcoin-Qt"])
+    find_executable(&["bitcoind-inq", "bitcoind", "bitcoind.exe", "Bitcoin-Qt", "Bitcoin-Qt.exe"])
         .ok_or_else(|| anyhow::anyhow!("could not find bitcoind on PATH"))
 }
 
 pub fn bitcoin_cli_binary() -> Result<PathBuf> {
-    find_executable(&["bitcoin-cli", "bitcoin-cli.exe"])
+    find_executable(&["bitcoin-cli-inq", "bitcoin-cli", "bitcoin-cli.exe"])
         .ok_or_else(|| anyhow::anyhow!("could not find bitcoin-cli on PATH"))
 }
 
