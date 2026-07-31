@@ -1,1 +1,6 @@
 /target
+.bitcoin/*
+!.bitcoin/bitcoin.conf
+bitcoin-**-inq
+inq-**
+**.tar.gz
