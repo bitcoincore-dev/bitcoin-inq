@@ -46,6 +46,8 @@ pub enum Commands {
     Node(NodeArgs),
     /// Install Bitcoin Inquisition release assets.
     Inquisition(InquisitionArgs),
+    /// List running processes.
+    ListProcesses(ProcessListArgs),
     /// Detect the chain the local Bitcoin Core node is running on.
     DetectNetwork(RpcArgs),
     /// Kill a process by PID.
@@ -140,6 +142,17 @@ pub struct ProcessArgs {
     /// Send SIGKILL instead of SIGTERM.
     #[arg(long, default_value_t = false)]
     pub force: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct ProcessListArgs {
+    /// Filter by process name.
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// Match the process name as a substring instead of exact basename.
+    #[arg(long, default_value_t = false)]
+    pub contains: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -264,6 +277,102 @@ pub fn kill_process(pid: u32, force: bool) -> Result<()> {
     } else {
         Err(anyhow::anyhow!("failed to terminate process {pid}"))
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub name: String,
+}
+
+fn process_name_matches(name: &str, filter: &str, contains: bool) -> bool {
+    let name = name.to_ascii_lowercase();
+    let filter = filter.to_ascii_lowercase();
+    if contains { name.contains(&filter) } else { name == filter }
+}
+
+fn process_name_from_path(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+#[cfg(not(windows))]
+fn list_processes_os() -> Result<Vec<ProcessInfo>> {
+    let output = Command::new("ps")
+        .args(["-A", "-o", "pid=", "-o", "comm="])
+        .output()
+        .context("failed to invoke ps")?;
+
+    if !output.status.success() {
+        return Err(anyhow::anyhow!("ps exited with a non-zero status"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut processes = Vec::new();
+
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let mut parts = trimmed.split_whitespace();
+        let pid = match parts.next().and_then(|pid| pid.parse::<u32>().ok()) {
+            Some(pid) => pid,
+            None => continue,
+        };
+        let name = parts.next().map(process_name_from_path).unwrap_or(trimmed).to_string();
+        processes.push(ProcessInfo { pid, name });
+    }
+
+    Ok(processes)
+}
+
+#[cfg(windows)]
+fn list_processes_os() -> Result<Vec<ProcessInfo>> {
+    let output = Command::new("tasklist")
+        .args(["/FO", "CSV", "/NH"])
+        .output()
+        .context("failed to invoke tasklist")?;
+
+    if !output.status.success() {
+        return Err(anyhow::anyhow!("tasklist exited with a non-zero status"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut processes = Vec::new();
+
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("INFO:") {
+            continue;
+        }
+
+        let cols: Vec<&str> = trimmed.trim_matches('"').split("\",\"").collect();
+        if cols.len() < 2 {
+            continue;
+        }
+
+        let name = cols[0].to_string();
+        let pid = match cols[1].replace(',', "").parse::<u32>() {
+            Ok(pid) => pid,
+            Err(_) => continue,
+        };
+
+        processes.push(ProcessInfo { pid, name });
+    }
+
+    Ok(processes)
+}
+
+pub fn list_processes(name: Option<&str>, contains: bool) -> Result<Vec<ProcessInfo>> {
+    let processes = list_processes_os()?;
+    Ok(match name {
+        Some(filter) => processes
+            .into_iter()
+            .filter(|process| process_name_matches(&process.name, filter, contains))
+            .collect(),
+        None => processes,
+    })
 }
 
 pub fn bitcoind_binary() -> Result<PathBuf> {
@@ -539,6 +648,12 @@ pub fn run(cli: Cli) -> Result<()> {
             NodeCommands::Start(args) => start_node(args),
             NodeCommands::Stop(args) => stop_node(args),
         },
+        Commands::ListProcesses(args) => {
+            for process in list_processes(args.name.as_deref(), args.contains)? {
+                println!("{}\t{}", process.pid, process.name);
+            }
+            Ok(())
+        }
         Commands::Inquisition(args) => {
             let dry_run = args.dry_run;
             let path = install_inquisition(args.install.as_deref(), args.dir.as_deref(), dry_run)?;
@@ -608,5 +723,12 @@ mod tests {
             println!("{}", release.tag_name);
         }
         assert!(!releases.is_empty());
+    }
+
+    #[test]
+    fn matches_process_names() {
+        assert!(process_name_matches("bitcoind", "bitcoind", false));
+        assert!(process_name_matches("bitcoind", "bitcoin", true));
+        assert_eq!(process_name_from_path("/usr/local/bin/bitcoind"), "bitcoind");
     }
 }
