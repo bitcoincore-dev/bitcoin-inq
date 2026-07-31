@@ -1,3 +1,4 @@
+use clap::Parser;
 use p2trc::{run, Cli};
 
 fn main() -> anyhow::Result<()> {
