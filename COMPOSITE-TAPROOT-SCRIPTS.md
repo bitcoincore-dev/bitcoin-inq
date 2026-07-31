@@ -265,3 +265,88 @@ You can combine these into a single **Constraint Leaf** within your Taproot tree
 When creating these, **always define your expected stack state** before and after the composite operation. Because Bitcoin Script is stack-based, a single missing `OP_DROP` or an extra `OP_DUP` in a long chain will cause the entire script to fail (or worse, leave junk data that changes the outcome of subsequent operations).
 
 **Which part of these composite structures would you like to refine? We could look into optimizing the stack depth for these operations, or perhaps how to integrate them into a larger covenant transaction.**
+
+To construct a **Taproot (P2TR)** script using these composite opcodes, you typically organize them into a **Script Tree**. This allows you to keep complex logic "hidden" within the Merkle tree, revealing only the specific path you choose to use.
+
+Below is an example of a **"Covenant-Lite" Vault**. This contract uses two leaves: one that enforces a specific mathematical calculation (a constraint) and one that allows a signature-based recovery.
+
+---
+
+### The Taproot Script Tree Structure
+
+We define two branches (leaves) under a single Merkle Root ($m$):
+
+* **Leaf A (Constraint):** Requires the spender to provide a "hint" (integer) that, when divided by 8, yields a specific remainder.
+* **Leaf B (Recovery):** A standard time-locked multisig recovery path.
+
+#### Leaf A: The Arithmetic Constraint
+
+*This script uses your `OP_8DIV_REM` primitive to enforce that the spent input must have a specific relationship to the value `123459`.*
+
+```bitcoin
+# Leaf A: Arithmetic Proof
+# Unlocking script provides the "hint" (the quotient)
+OP_DUP
+OP_DUP OP_ADD OP_DUP OP_ADD OP_DUP OP_ADD  # Multiply hint by 8 (OP_8MUL)
+<123459>                                   # The constant
+OP_SWAP
+OP_SUB                                     # remainder = 123459 - (hint * 8)
+OP_DUP
+0
+8
+OP_WITHIN                                  # Verify remainder is [0, 8)
+OP_VERIFY
+<Public_Key_A> OP_CHECKSIG
+
+```
+
+#### Leaf B: Time-Locked Recovery
+
+*This uses the time-check primitive to ensure funds can only be recovered after a specific block height.*
+
+```bitcoin
+# Leaf B: Recovery Path
+<700123>
+OP_CHECKLOCKTIMEVERIFY
+OP_DROP
+<Public_Key_B> OP_CHECKSIG
+
+```
+
+---
+
+### How to Assemble this in Taproot
+
+To turn these into a functional P2TR output, you follow these steps:
+
+1. **Serialize the Leaves:**
+* `Leaf_A_Script` = `[Script A Bytecode]`
+* `Leaf_B_Script` = `[Script B Bytecode]`
+* Tag each with the `Leaf Version` (`0xc0`).
+
+
+2. **Compute the Merkle Tree:**
+* `H_A = HashTapLeaf(Leaf_A_Script)`
+* `H_B = HashTapLeaf(Leaf_B_Script)`
+* `Merkle_Root = HashTapBranch(H_A || H_B)`
+
+
+3. **Tweaking the Internal Key:**
+* Start with an internal public key $P$ (e.g., a multisig aggregate key).
+* `Output_PubKey = P + HashTapTweak(P || Merkle_Root) * G`
+
+
+
+---
+
+### Key Practical Considerations
+
+* **Handling the "Hint" in the Unlocking Script:** When spending via Leaf A, your unlocking script (the witness) must contain the "hint" (the quotient) followed by the signature. Because you used `OP_DUP` and `OP_SIZE` to prevent malleability in your primitives, ensure your witness stack is **minimally encoded** (e.g., `01` for true, not `0001`).
+* **Managing Stack Depth:** In your composite opcode `OP_13MUL`, you heavily utilize `OP_TOALTSTACK`. Remember that `OP_FROMALTSTACK` **must** be called to clear the altstack before the script finishes. If you leave data on the altstack, the Tapscript validator will consider the script invalid.
+* **Optimization:** Since you are limited to 201 non-push opcodes, if you use a long chain like the `Rotate Left by 3` example, try to consolidate the `OP_ADD` operations. Every `OP_ADD` counts toward that 201 limit, but pushing constants (like the rotation masks) does not.
+
+### Why this is a "Composite" Taproot Script
+
+You have effectively created a **"Predicate-based" vault**. The user cannot simply move the funds by signing; they must also provide a value (the hint) that satisfies the mathematical predicate (Leaf A). Because it is a Taproot tree, an observer of the blockchain—unless they see a transaction spending via Leaf A—has no idea that this mathematical constraint even exists; the contract appears identical to a standard P2TR address.
+
+**Are you planning to implement the Merkle tree construction in Python or Rust, or are you focusing on writing the raw bytecode for these leaves?**
