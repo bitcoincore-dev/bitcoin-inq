@@ -263,11 +263,6 @@ fn default_rpc_urls() -> Vec<String> {
     .collect()
 }
 
-fn default_conf_path(chain: ChainSelection) -> PathBuf {
-    let _ = chain;
-    PathBuf::from("bitcoin.conf")
-}
-
 fn resolved_conf_arg(chain: ChainSelection, conf: &Path) -> PathBuf {
     let _ = chain;
     conf.to_path_buf()
