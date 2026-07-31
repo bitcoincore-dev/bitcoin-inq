@@ -465,7 +465,7 @@ fn normalize_tag(tag: &str) -> String {
 }
 
 fn is_version_list_request(version: Option<&str>) -> bool {
-    matches!(version.map(str::trim), Some("") | Some("empty"))
+    version.is_none() || matches!(version.map(str::trim), Some("") | Some("empty"))
 }
 
 fn resolve_release_tag(requested: Option<&str>, releases: &[GitHubRelease]) -> Result<String> {
