@@ -1206,3 +1206,85 @@ pub fn construct_left_rotate_snippet(expected_result: i64) -> ScriptBuf {
 }
 
 ```
+
+```rust
+use bitcoin::blockdata::opcodes::all::*;
+use bitcoin::script::{Builder, PushBytesBuf};
+use bitcoin::ScriptBuf;
+
+/// Re-implements the full "Covenant-Lite" Policy Vault Leaf Script in Rust.
+///
+/// Expected Witness Stack (from bottom to top / first pushed to last pushed):
+/// 1. Hint (the integer used for the 8DIV_REM check)
+/// 2. Signature (Schnorr signature)
+pub fn construct_policy_vault_leaf(constant_value: i64, public_key_bytes: &[u8]) -> ScriptBuf {
+    let mut builder = Builder::new();
+
+    // ==========================================
+    // 1. SETUP & SIGNATURE PROTECTION
+    // ==========================================
+
+    // OP_TOALTSTACK -> Protect/store the Signature temporarily on the AltStack
+    builder = builder.push_opcode(OP_TOALTSTACK);
+
+    // <Hint> OP_DUP OP_TOALTSTACK -> Push the hint, duplicate it, and store a copy for math
+    // Note: In standard execution, the Hint is already provided on the stack by the witness,
+    // but we duplicate and manage it alongside our arithmetic flow.
+    builder = builder
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_TOALTSTACK);
+
+    // ==========================================
+    // 2. ARITHMETIC PHASE (8DIV_REM Logic)
+    // ==========================================
+
+    // Multiply hint by 8 (OP_8MUL: DUP ADD DUP ADD DUP ADD)
+    builder = builder
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_ADD)
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_ADD)
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_ADD);
+
+    // Push constant, swap, and subtract to find the remainder: remainder = Constant - (Hint * 8)
+    let push_constant = PushBytesBuf::try_from(&constant_value.to_le_bytes()[..])
+        .expect("constant exceeds push limits");
+
+    builder = builder
+        .push_slice(&push_constant)
+        .push_opcode(OP_SWAP)
+        .push_opcode(OP_SUB);
+
+    // Verify remainder is within the valid range [0, 8)
+    builder = builder
+        .push_opcode(OP_DUP)
+        .push_int(0)
+        .push_int(8)
+        .push_opcode(OP_WITHIN)
+        .push_opcode(OP_VERIFY);
+
+    // ==========================================
+    // 3. CLEANUP & SIGNATURE VERIFICATION
+    // ==========================================
+
+    // OP_FROMALTSTACK OP_DROP -> Clear the extra math/hint residue from the AltStack
+    builder = builder
+        .push_opcode(OP_FROMALTSTACK)
+        .push_opcode(OP_DROP);
+
+    // OP_FROMALTSTACK -> Retrieve the protected Signature from the AltStack back to main stack
+    builder = builder.push_opcode(OP_FROMALTSTACK);
+
+    // Push the public key into the script bytes
+    let pubkey_push = PushBytesBuf::try_from(public_key_bytes)
+        .expect("public key bytes exceed push limits");
+    builder = builder.push_slice(&pubkey_push);
+
+    // OP_CHECKSIG -> Validates the signature against the public key
+    builder = builder.push_opcode(OP_CHECKSIG);
+
+    builder.into_script()
+}
+
+```
