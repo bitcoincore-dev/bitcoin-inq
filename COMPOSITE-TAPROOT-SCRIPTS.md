@@ -149,3 +149,119 @@ If you want to spend via the **Arithmetic Path**:
 3. Provide the `control_block` (the Merkle proof connecting H1 to the Merkle root $m$).
 
 **Would you like to focus on the serialization of these leaves for a specific library (like `rust-bitcoin`), or are you looking to optimize the bitwise logic further?**
+
+Building on the primitive "Composite Opcode" design pattern, here are three additional, more advanced examples. These utilize stack manipulation and conditional logic to perform complex operations within the limitations of Bitcoin Script.
+
+### 1. OP_ABS (Absolute Value)
+
+Bitcoin Script integers are signed. To force a number to be positive (e.g., for bitwise operations or distance calculations), you can use this pattern.
+
+```bitcoin
+# If the number is negative, negate it to make it positive.
+OP_DUP
+0
+OP_LESSTHAN
+OP_IF
+    OP_NEGATE
+OP_ENDIF
+
+```
+
+---
+
+### 2. OP_MIN and OP_MAX (Multi-item)
+
+While `OP_MIN` and `OP_MAX` exist natively for two items, you can create a "Clamp" function to restrict a value between a `lower_bound` and `upper_bound`. This is highly useful for validating user-provided inputs in a smart contract.
+
+**Example: Clamp Input between 10 and 100**
+
+```bitcoin
+# Input is on top of stack
+# Stack: [val]
+
+# Force Upper Bound (100)
+100 OP_MIN
+
+# Force Lower Bound (10)
+10 OP_MAX
+
+# Result: Value is guaranteed to be in [10, 100]
+
+```
+
+---
+
+### 3. OP_IS_POWER_OF_TWO
+
+This script checks if a number is a power of two ($2^n$). It uses the mathematical property that $x \& (x - 1) == 0$. Since we don't have bitwise `AND`, we simulate the check via subtraction and range verification.
+
+```bitcoin
+# Input: x (must be > 0)
+OP_DUP
+1 OP_SUB
+OP_BOOLAND # This requires a custom OP_BOOLAND implementation
+           # or can be checked by verifying the bitwise logic:
+
+# Logic: x * (x-1) == 0 is not easily done,
+# so we check if the binary representation has only one '1'.
+# Simplified approach:
+OP_DUP
+OP_1SUB
+OP_ADD
+# If result is not a power of 2, the arithmetic will fail
+# the expected pattern check.
+
+```
+
+---
+
+### 4. Advanced Stack Manipulation: "Swap-Three" (ROT)
+
+In complex contracts, you often need to rotate the top three items on the stack without using `ROLL` (which is expensive and harder to track).
+
+**Goal: Change `[A, B, C]` to `[B, C, A]**`
+
+```bitcoin
+# Stack: A B C
+OP_ROT # Moves A to the top: [B, C, A]
+
+```
+
+If you need to rotate in the opposite direction `[A, B, C]` to `[C, A, B]`:
+
+```bitcoin
+# Stack: A B C
+OP_TOALTSTACK # [A, B] (C is in Alt)
+OP_SWAP       # [B, A]
+OP_FROMALTSTACK # [B, A, C]
+OP_ROT        # [A, C, B] ... note that precise rotation
+              # depends on your starting stack depth.
+
+```
+
+---
+
+### 5. Implementation in Taproot: The "Constraint" Leaf
+
+You can combine these into a single **Constraint Leaf** within your Taproot tree to enforce protocol rules.
+
+**Example: Ensuring an Input Value is a Power of Two and within a specific range**
+
+```bitcoin
+# Tapscript Leaf
+# 1. Enforce Range [1, 1024]
+1024 OP_MIN
+1 OP_MAX
+1024 OP_EQUALVERIFY
+
+# 2. Check Power of Two (Logic: x & (x-1) == 0)
+# Here you would insert the binary check logic provided earlier.
+# This makes for a "restricted value" covenant.
+
+```
+
+### Pro-Tip for Designing these Opcodes:
+
+When creating these, **always define your expected stack state** before and after the composite operation. Because Bitcoin Script is stack-based, a single missing `OP_DROP` or an extra `OP_DUP` in a long chain will cause the entire script to fail (or worse, leave junk data that changes the outcome of subsequent operations).
+
+**Which part of these composite structures would you like to refine? We could look into optimizing the stack depth for these operations, or perhaps how to integrate them into a larger covenant transaction.**
