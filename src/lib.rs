@@ -105,7 +105,7 @@ pub struct RpcArgs {
 #[derive(Debug, Args, Clone)]
 pub struct NodeStartArgs {
     /// Bitcoin Core chain to start.
-    #[arg(long, value_enum, default_value_t = ChainSelection::Testnet)]
+    #[arg(long, value_enum, default_value_t = ChainSelection::Testnet4)]
     pub chain: ChainSelection,
 
     /// Signet challenge for custom signet networks.
