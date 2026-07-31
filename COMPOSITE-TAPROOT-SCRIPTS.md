@@ -620,3 +620,109 @@ If your script fails, it is almost always due to one of these three issues:
 * **Script Length:** Remember that `btcdeb` shows you the opcode count. If your rotation logic exceeds 201 non-push opcodes, you will need to shorten the rotation chain by using `OP_PICK` or `OP_ROLL` to reuse existing values on the stack rather than re-computing them.
 
 **Would you like to try constructing the `Merkle Root` for this specific script, or are you ready to test this logic in a simulation environment?**
+
+To construct a Merkle root for the script provided, we must follow the **BIP 341** specification. In Taproot, the Merkle tree is built by hashing leaf nodes and then pairing them up until a single root is reached.
+
+### 1. Constructing the Merkle Root
+
+Let's assume our Taproot tree consists of two leaves:
+
+* **Leaf A (The Rotation Script):** The bitwise rotation script designed in the previous step.
+* **Leaf B (The Recovery Script):** A simple time-locked recovery script.
+
+#### Step A: Serialize the Leaves
+
+Each leaf is created by concatenating the leaf version (`0xc0`), the script size (compact size), and the script bytecode:
+
+* `Leaf_A = HashTapLeaf(0xc0 || VarInt(len(ScriptA)) || ScriptA)`
+* `Leaf_B = HashTapLeaf(0xc0 || VarInt(len(ScriptB)) || ScriptB)`
+
+#### Step B: Sort and Hash
+
+To ensure the Merkle root is deterministic, we sort the leaf hashes lexicographically:
+
+* `If Hash_A < Hash_B: MerkleRoot = HashTapBranch(Hash_A || Hash_B)`
+* `Else: MerkleRoot = HashTapBranch(Hash_B || Hash_A)`
+
+---
+
+### 2. Full Examples Summary
+
+Below is a collection of the key primitives and the integrated Taproot logic we have discussed.
+
+#### A. Primitive: Arithmetic & Bitwise
+
+These primitives rely on "hints" passed in the witness stack to keep scripts efficient and within the 201-opcode limit.
+
+**Example: OP_8DIV_REM**
+
+```bitcoin
+# Verification of integer division by 8
+# Input (stack): [Hint] [Number_to_divide]
+OP_DUP
+OP_DUP OP_ADD OP_DUP OP_ADD OP_DUP OP_ADD # 8 * Hint
+OP_SWAP OP_SUB                            # Remainder
+OP_DUP 0 8 OP_WITHIN OP_VERIFY            # Verify remainder is [0, 8)
+
+```
+
+**Example: Left Rotate 3 bits (Simplified 24-bit)**
+
+```bitcoin
+# Input (stack): [Hint] [Quotient]
+# Logic: (Hint << 3) + (Hint >> 21)
+OP_DUP OP_TOALTSTACK                      # Store Hint
+OP_DUP OP_DUP OP_ADD OP_DUP OP_ADD OP_DUP OP_ADD # Shift << 3
+OP_TOALTSTACK                             # Store Shifted
+# ... (Verify Quotient for Shift >> 21) ...
+OP_FROMALTSTACK OP_ADD                    # Combined Result
+<Expected_Result> OP_EQUALVERIFY          # Constraint
+
+```
+
+#### B. Primitive: Covenant-Lite (The Policy Vault)
+
+This combines signature checking with arithmetic constraints.
+
+```bitcoin
+# The Full Script Leaf
+OP_TOALTSTACK                     # Protect Signature
+<Hint> OP_DUP OP_TOALTSTACK       # Store Hint for Math
+# ... (Execute 8DIV_REM Logic) ...
+OP_FROMALTSTACK OP_DROP           # Clear Math Stack
+OP_FROMALTSTACK                   # Retrieve Signature
+<PublicKey> OP_CHECKSIG
+
+```
+
+#### C. Full Script Implementation (Contextual Flow)
+
+This is the consolidated logic for a Taproot leaf that enforces a specific mathematical input before allowing a signature:
+
+```bitcoin
+# Taproot Script Leaf (P2TR)
+# Witness Stack: [Signature, Quotient, Hint]
+# (Bottom to Top)
+
+# 1. Arithmetic/Bitwise Phase
+OP_DUP OP_TOALTSTACK              # Save Hint to AltStack
+# ... (Perform 8DIV logic using Quotient provided in witness) ...
+OP_VERIFY                         # Math check fails if hint is wrong
+
+# 2. Cleanup
+OP_FROMALTSTACK OP_DROP           # Clear the Hint
+OP_FROMALTSTACK                   # Retrieve Signature
+# (Implicitly) Signature is at top of stack for CHECKSIG
+
+# 3. Cryptographic Phase
+<PublicKey> OP_CHECKSIG
+
+```
+
+### Important Implementation Notes for Production/Testing
+
+1. **Merkle Proofs:** When spending Leaf A, your witness must include the `Control Block`, which contains the `Internal Key`, the `Leaf Version`, and the `Merkle Path` (the hash of Leaf B).
+2. **`btcdeb` Testing:** When testing, always use `btcdeb` to ensure your stack depth at `OP_CHECKSIG` is exactly `[Signature, PublicKey]`.
+3. **Limits:** If you add more complex branches to your Merkle tree, the Merkle path in your witness will grow, but the **size of the leaf script** itself remains fixed, keeping your transaction fees predictable.
+
+Would you like to explore how to serialize the **Control Block** for this Merkle tree, or are you focused on further refining the arithmetic primitives?
