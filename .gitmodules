@@ -1,0 +1,6 @@
+[submodule "coins/bitcoin-scripts"]
+	path = coins/bitcoin-scripts
+	url = https://github.com/coins/bitcoin-scripts.git
+[submodule "mr-zwets/Composite-Arithmetic-Opcodes"]
+	path = mr-zwets/Composite-Arithmetic-Opcodes
+	url = https://github.com/mr-zwets/Composite-Arithmetic-Opcodes.git
