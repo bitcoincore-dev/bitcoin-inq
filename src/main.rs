@@ -1,5 +1,5 @@
 use clap::Parser;
-use p2trc::{Cli, run};
+use bitcoin_inq::{Cli, run};
 
 fn main() -> anyhow::Result<()> {
     run(Cli::parse())
