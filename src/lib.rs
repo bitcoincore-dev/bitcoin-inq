@@ -135,9 +135,12 @@ pub struct NodeStartArgs {
 
 #[derive(Debug, Args, Clone)]
 pub struct ProcessArgs {
+    /// Process name to terminate.
+    pub name: Option<String>,
+
     /// Process ID to terminate.
     #[arg(long)]
-    pub pid: u32,
+    pub pid: Option<u32>,
 
     /// Send SIGKILL instead of SIGTERM.
     #[arg(long, default_value_t = false)]
@@ -673,7 +676,27 @@ pub fn run(cli: Cli) -> Result<()> {
             println!("{network}");
             Ok(())
         }
-        Commands::Kill(args) => kill_process(args.pid, args.force),
+        Commands::Kill(args) => match (args.name.as_deref(), args.pid) {
+            (Some(name), _) => {
+                let processes = list_processes(Some(name), false)?;
+                if processes.is_empty() {
+                    return Err(anyhow::anyhow!("no processes matched {name}"));
+                }
+
+                for process in processes {
+                    kill_process(process.pid, args.force)?;
+                }
+
+                Ok(())
+            }
+            (None, Some(pid)) => kill_process(pid, args.force),
+            (None, None) => {
+                for process in list_processes(None, false)? {
+                    println!("{}\t{}", process.pid, process.name);
+                }
+                Ok(())
+            }
+        },
     }
 }
 
