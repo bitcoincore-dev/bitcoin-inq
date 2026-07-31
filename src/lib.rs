@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::fs;
+use std::io::Write;
 
 use anyhow::{Context, Result};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
@@ -32,6 +33,16 @@ impl ChainSelection {
             Self::Testnet4 => bitcoin::Network::Testnet4,
             Self::Signet => bitcoin::Network::Signet,
             Self::Regtest => bitcoin::Network::Regtest,
+        }
+    }
+
+    pub fn cli_flag(self) -> Option<&'static str> {
+        match self {
+            Self::Mainnet => None,
+            Self::Testnet => Some("-testnet"),
+            Self::Testnet4 => Some("-testnet4"),
+            Self::Signet => Some("-signet"),
+            Self::Regtest => Some("-regtest"),
         }
     }
 }
@@ -120,7 +131,7 @@ pub struct RpcArgs {
 #[derive(Debug, Args, Clone)]
 pub struct NodeStartArgs {
     /// Bitcoin Core chain to start.
-    #[arg(long, value_enum, default_value_t = ChainSelection::Testnet4)]
+    #[arg(long, value_enum, default_value_t = ChainSelection::Regtest)]
     pub chain: ChainSelection,
 
     /// Bitcoin Core config file.
@@ -250,6 +261,39 @@ fn default_rpc_urls() -> Vec<String> {
     .into_iter()
     .map(String::from)
     .collect()
+}
+
+fn default_conf_path(chain: ChainSelection) -> PathBuf {
+    let _ = chain;
+    PathBuf::from("bitcoin.conf")
+}
+
+fn resolved_conf_arg(chain: ChainSelection, conf: &Path) -> PathBuf {
+    let _ = chain;
+    conf.to_path_buf()
+}
+
+fn default_datadir(chain: ChainSelection) -> PathBuf {
+    match chain {
+        ChainSelection::Signet => PathBuf::from(".bitcoin/signet"),
+        _ => PathBuf::from(".bitcoin"),
+    }
+}
+
+fn resolved_datadir(chain: ChainSelection, datadir: &Path) -> PathBuf {
+    if datadir == Path::new(".bitcoin") {
+        default_datadir(chain)
+    } else {
+        datadir.to_path_buf()
+    }
+}
+
+fn resolved_conf_file(datadir: &Path, conf_arg: &Path) -> PathBuf {
+    if conf_arg.is_absolute() {
+        conf_arg.to_path_buf()
+    } else {
+        datadir.join(conf_arg)
+    }
 }
 
 pub fn detect_network(client: &Client) -> Result<NetworkKind> { detect_network_with_override(client, None) }
@@ -525,6 +569,15 @@ fn inquisition_release_dir(tag: &str) -> String {
     format!("bitcoin-{}", normalize_tag(tag))
 }
 
+fn signet_config_template(challenge: Option<&str>) -> String {
+    let mut config = String::from("signet=1\n");
+    if let Some(challenge) = challenge {
+        config.push_str(&format!("signetchallenge={challenge}\n"));
+    }
+    config.push_str("\n[signet]\n");
+    config
+}
+
 fn gh_release_download(tag: &str, asset_name: &str, dir: &Path) -> Result<PathBuf> {
     let status = Command::new("gh")
         .args([
@@ -658,6 +711,21 @@ fn install_binary_into_path(source: &Path, path_dir: &Path, force: bool) -> Resu
     Ok(destination)
 }
 
+fn ensure_node_config(chain: ChainSelection, conf_path: &Path, signetchallenge: Option<&str>) -> Result<()> {
+    if chain != ChainSelection::Signet || conf_path.exists() {
+        return Ok(());
+    }
+
+    if let Some(parent) = conf_path.parent() {
+        fs::create_dir_all(parent).context("failed to create node config directory")?;
+    }
+
+    let mut file = fs::File::create(conf_path).context("failed to create signet config")?;
+    file.write_all(signet_config_template(signetchallenge).as_bytes())
+        .context("failed to write signet config")?;
+    Ok(())
+}
+
 pub fn install_inquisition(
     version: Option<&str>,
     dir: &Path,
@@ -727,11 +795,20 @@ pub fn start_node(args: NodeStartArgs) -> Result<()> {
         ));
     }
 
+    let datadir = resolved_datadir(args.chain, &args.datadir);
+    let conf_arg = resolved_conf_arg(args.chain, &args.conf);
+    let conf_path = resolved_conf_file(&datadir, &conf_arg);
+    if !args.dry_run {
+        ensure_node_config(args.chain, &conf_path, args.signetchallenge.as_deref())?;
+    }
+
     let node_binary = if args.gui { bitcoin_qt_binary()? } else { bitcoind_binary()? };
     let mut command = Command::new(&node_binary);
-    command.arg(format!("-chain={}", args.chain.network().to_core_arg()));
-    command.arg(format!("-conf={}", args.conf.display()));
-    command.arg(format!("-datadir={}", args.datadir.display()));
+    if let Some(flag) = args.chain.cli_flag() {
+        command.arg(flag);
+    }
+    command.arg(format!("-conf={}", conf_arg.display()));
+    command.arg(format!("-datadir={}", datadir.display()));
 
     if let Some(challenge) = &args.signetchallenge {
         command.arg(format!("-signetchallenge={challenge}"));
@@ -923,5 +1000,28 @@ mod tests {
         assert!(is_version_list_request(Some("")));
         assert!(is_version_list_request(Some("empty")));
         assert!(!is_version_list_request(Some("v29.4-inq")));
+    }
+
+    #[test]
+    fn resolves_signet_conf_path() {
+        assert_eq!(
+            resolved_conf_arg(ChainSelection::Signet, Path::new("bitcoin.conf")),
+            PathBuf::from("signet/bitcoin.conf")
+        );
+        assert_eq!(
+            resolved_conf_file(Path::new(".bitcoin"), &resolved_conf_arg(ChainSelection::Signet, Path::new("bitcoin.conf"))),
+            PathBuf::from(".bitcoin/signet/bitcoin.conf")
+        );
+        assert_eq!(
+            resolved_conf_file(Path::new(".bitcoin"), &resolved_conf_arg(ChainSelection::Regtest, Path::new("bitcoin.conf"))),
+            PathBuf::from(".bitcoin/bitcoin.conf")
+        );
+    }
+
+    #[test]
+    fn builds_signet_config_template() {
+        let template = signet_config_template(Some("001122"));
+        assert!(template.contains("signet=1"));
+        assert!(template.contains("signetchallenge=001122"));
     }
 }
