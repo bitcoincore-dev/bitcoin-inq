@@ -56,6 +56,8 @@ pub enum Commands {
 pub enum NodeCommands {
     /// Start bitcoind with a selected chain.
     Start(NodeStartArgs),
+    /// Stop a running Bitcoin Core node.
+    Stop(RpcArgs),
 }
 
 #[derive(Debug, Args)]
@@ -109,7 +111,7 @@ pub struct NodeStartArgs {
     pub chain: ChainSelection,
 
     /// Bitcoin Core config file.
-    #[arg(long, default_value = ".bitcoin/bitcoin.conf")]
+    #[arg(long, default_value = "bitcoin.conf")]
     pub conf: PathBuf,
 
     /// Signet challenge for custom signet networks.
@@ -497,10 +499,45 @@ pub fn start_node(args: NodeStartArgs) -> Result<()> {
     }
 }
 
+pub fn stop_node(args: RpcArgs) -> Result<()> {
+    let bitcoin_cli = bitcoin_cli_binary()?;
+
+    let mut command = Command::new(bitcoin_cli);
+    command.arg("stop");
+
+    if let Some(rpc_url) = &args.rpc_url {
+        command.arg(format!("-rpcconnect={rpc_url}"));
+    }
+
+    if let Some(cookie_file) = &args.cookie_file {
+        command.arg(format!("-rpccookiefile={}", cookie_file.display()));
+    }
+
+    if let Some(user) = &args.rpc_user {
+        command.arg(format!("-rpcuser={user}"));
+    }
+
+    if let Some(password) = &args.rpc_password {
+        command.arg(format!("-rpcpassword={password}"));
+    }
+
+    if let Some(challenge) = &args.signet_challenge {
+        command.arg(format!("-signetchallenge={challenge}"));
+    }
+
+    let status = command.status().context("failed to invoke bitcoin-cli")?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("bitcoin-cli exited with a non-zero status"))
+    }
+}
+
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Node(node) => match node.command {
             NodeCommands::Start(args) => start_node(args),
+            NodeCommands::Stop(args) => stop_node(args),
         },
         Commands::Inquisition(args) => {
             let dry_run = args.dry_run;
