@@ -4,6 +4,7 @@ use std::fs;
 use std::io::Write;
 
 use anyhow::{Context, Result};
+use bitcoin::address::{Address, NetworkUnchecked};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use flate2::read::GzDecoder;
@@ -72,6 +73,8 @@ pub enum Commands {
 pub enum NodeCommands {
     /// Start bitcoind with a selected chain.
     Start(NodeStartArgs),
+    /// Mine regtest blocks to create spendable coins.
+    Mine(MineArgs),
     /// Stop a running Bitcoin Core node.
     Stop(RpcArgs),
 }
@@ -157,6 +160,21 @@ pub struct NodeStartArgs {
     /// Print the command instead of executing it.
     #[arg(long, default_value_t = false)]
     pub dry_run: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct MineArgs {
+    /// RPC connection options for the local node.
+    #[command(flatten)]
+    pub rpc: RpcArgs,
+
+    /// Number of blocks to mine.
+    #[arg(long, default_value_t = 101)]
+    pub blocks: u64,
+
+    /// Destination address for the coinbase rewards.
+    #[arg(long)]
+    pub address: Option<String>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -261,6 +279,37 @@ fn default_rpc_urls() -> Vec<String> {
     .into_iter()
     .map(String::from)
     .collect()
+}
+
+fn rpc_client_auto() -> Result<Client> {
+    let cookies = default_cookie_paths();
+    let urls = default_rpc_urls();
+
+    for rpc_url in urls {
+        for cookie in &cookies {
+            if !cookie.exists() {
+                continue;
+            }
+
+            if let Ok(client) = Client::new(&rpc_url, Auth::CookieFile(cookie.clone())) {
+                if client.get_blockchain_info().is_ok() {
+                    return Ok(client);
+                }
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "could not auto-detect a local Bitcoin Core node; pass --rpc-url and auth flags explicitly"
+    ))
+}
+
+fn rpc_client_from_args(args: &RpcArgs) -> Result<Client> {
+    if let Some(rpc_url) = &args.rpc_url {
+        Client::new(rpc_url, rpc_auth(args)?).with_context(|| format!("failed to connect to {rpc_url}"))
+    } else {
+        rpc_client_auto()
+    }
 }
 
 fn resolved_conf_arg(chain: ChainSelection, conf: &Path) -> PathBuf {
@@ -565,12 +614,18 @@ fn inquisition_release_dir(tag: &str) -> String {
 }
 
 fn signet_config_template(challenge: Option<&str>) -> String {
-    let mut config = String::from("signet=1\n");
+    let mut config = String::from("signet=1\nprinttoconsole=1\nserver=1\n");
     if let Some(challenge) = challenge {
         config.push_str(&format!("signetchallenge={challenge}\n"));
     }
     config.push_str("\n[signet]\n");
     config
+}
+
+fn regtest_config_template() -> String {
+    String::from(
+        "regtest=1\nprinttoconsole=1\nserver=1\nfallbackfee=0.00001\nminrelaytxfee=0\nblockmintxfee=0\n",
+    )
 }
 
 fn gh_release_download(tag: &str, asset_name: &str, dir: &Path) -> Result<PathBuf> {
@@ -707,7 +762,7 @@ fn install_binary_into_path(source: &Path, path_dir: &Path, force: bool) -> Resu
 }
 
 fn ensure_node_config(chain: ChainSelection, conf_path: &Path, signetchallenge: Option<&str>) -> Result<()> {
-    if chain != ChainSelection::Signet || conf_path.exists() {
+    if conf_path.exists() {
         return Ok(());
     }
 
@@ -716,8 +771,12 @@ fn ensure_node_config(chain: ChainSelection, conf_path: &Path, signetchallenge: 
     }
 
     let mut file = fs::File::create(conf_path).context("failed to create signet config")?;
-    file.write_all(signet_config_template(signetchallenge).as_bytes())
-        .context("failed to write signet config")?;
+    let template = match chain {
+        ChainSelection::Signet => signet_config_template(signetchallenge),
+        ChainSelection::Regtest => regtest_config_template(),
+        _ => return Ok(()),
+    };
+    file.write_all(template.as_bytes()).context("failed to write node config")?;
     Ok(())
 }
 
@@ -835,43 +894,53 @@ pub fn start_node(args: NodeStartArgs) -> Result<()> {
 }
 
 pub fn stop_node(args: RpcArgs) -> Result<()> {
-    let bitcoin_cli = bitcoin_cli_binary()?;
+    let client = rpc_client_from_args(&args)?;
+    client.stop().context("failed to stop node")?;
+    Ok(())
+}
 
-    let mut command = Command::new(bitcoin_cli);
-    command.arg("stop");
+pub fn mine_blocks(args: MineArgs) -> Result<()> {
+    let client = rpc_client_from_args(&args.rpc)?;
+    let info = client.get_blockchain_info().context("failed to query blockchain info")?;
 
-    if let Some(rpc_url) = &args.rpc_url {
-        command.arg(format!("-rpcconnect={rpc_url}"));
+    if info.chain != bitcoin::Network::Regtest {
+        return Err(anyhow::anyhow!(
+            "node mine only supports regtest; use an external miner for signet"
+        ));
     }
 
-    if let Some(cookie_file) = &args.cookie_file {
-        command.arg(format!("-rpccookiefile={}", cookie_file.display()));
+    let address = match args.address {
+        Some(address) => {
+            let unchecked = address
+                .parse::<Address<NetworkUnchecked>>()
+                .context("invalid destination address")?;
+            unchecked
+                .require_network(bitcoin::Network::Regtest)
+                .context("destination address is not for regtest")?
+        }
+        None => client
+            .get_new_address(None, None)
+            .context("failed to get a new address from the wallet")?
+            .require_network(bitcoin::Network::Regtest)
+            .context("wallet returned an address for the wrong network")?,
+    };
+
+    let blocks = client
+        .generate_to_address(args.blocks, &address)
+        .context("failed to mine blocks")?;
+
+    for block in blocks {
+        println!("{block}");
     }
 
-    if let Some(user) = &args.rpc_user {
-        command.arg(format!("-rpcuser={user}"));
-    }
-
-    if let Some(password) = &args.rpc_password {
-        command.arg(format!("-rpcpassword={password}"));
-    }
-
-    if let Some(challenge) = &args.signet_challenge {
-        command.arg(format!("-signetchallenge={challenge}"));
-    }
-
-    let status = command.status().context("failed to invoke bitcoin-cli")?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!("bitcoin-cli exited with a non-zero status"))
-    }
+    Ok(())
 }
 
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Node(node) => match node.command {
             NodeCommands::Start(args) => start_node(args),
+            NodeCommands::Mine(args) => mine_blocks(args),
             NodeCommands::Stop(args) => stop_node(args),
         },
         Commands::ListProcesses(args) => {
@@ -930,26 +999,8 @@ pub fn run(cli: Cli) -> Result<()> {
 }
 
 pub fn detect_network_auto(signet_challenge: Option<&str>) -> Result<NetworkKind> {
-    let cookies = default_cookie_paths();
-    let urls = default_rpc_urls();
-
-    for rpc_url in urls {
-        for cookie in &cookies {
-            if !cookie.exists() {
-                continue;
-            }
-
-            if let Ok(client) = Client::new(&rpc_url, Auth::CookieFile(cookie.clone())) {
-                if let Ok(network) = detect_network_with_override(&client, signet_challenge) {
-                    return Ok(network);
-                }
-            }
-        }
-    }
-
-    Err(anyhow::anyhow!(
-        "could not auto-detect a local Bitcoin Core node; pass --rpc-url and auth flags explicitly"
-    ))
+    let client = rpc_client_auto()?;
+    detect_network_with_override(&client, signet_challenge)
 }
 
 #[cfg(test)]
@@ -1023,6 +1074,15 @@ mod tests {
     fn builds_signet_config_template() {
         let template = signet_config_template(Some("001122"));
         assert!(template.contains("signet=1"));
+        assert!(template.contains("server=1"));
         assert!(template.contains("signetchallenge=001122"));
+    }
+
+    #[test]
+    fn builds_regtest_config_template() {
+        let template = regtest_config_template();
+        assert!(template.contains("regtest=1"));
+        assert!(template.contains("server=1"));
+        assert!(template.contains("fallbackfee=0.00001"));
     }
 }
