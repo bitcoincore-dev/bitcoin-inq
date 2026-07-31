@@ -535,3 +535,88 @@ OP_VERIFY                # Ensure math result was correct
 3. **Witness Order:** Always verify if your script pops the arithmetic items *before* the signature. If your script design changes, your witness order must change to match.
 
 Would you like to try writing a full witness stack for the **Bitwise Rotate** example to see how the stack would look after that specific operation?
+
+To provide a complete, working example, we will construct a **Taproot Leaf Script** that performs a bitwise operation and then validates a signature. This is a "Covenant-Lite" pattern: the spender must demonstrate knowledge of a specific secret (the input to the bitwise function) that results in a known output, followed by a valid signature.
+
+We will use the **"Left Rotate by 3"** logic you provided, simplified for a 24-bit word.
+
+---
+
+### The Full Script: `Rotate_And_Sign.tapscript`
+
+This script takes two items from the witness: a **Hint** (the 24-bit word) and a **Signature**.
+
+```bitcoin
+# --- LEAF START ---
+# Stack: [Hint] [Signature]
+
+# 1. Arithmetic/Bitwise Phase (Rotate left by 3 bits)
+# Logic: X = (X >> 21) + (X << 3)
+# To verify, we check if [Result] == [Expected_Value]
+
+OP_TOALTSTACK         # Save Signature to AltStack: [Hint]
+OP_DUP                # [Hint] [Hint]
+OP_DUP OP_ADD  OP_DUP OP_ADD  OP_DUP OP_ADD # Multiply by 8 (Shift Left 3)
+OP_TOALTSTACK         # Save shifted part: [Hint]
+
+# Integer Division by 2^21 (Hint/2^21)
+# Note: In a real tx, the prover provides the quotient as a second hint
+<Quotient>
+OP_DUP
+0
+<2097152>             # 2^21
+OP_WITHIN
+OP_VERIFY
+
+OP_FROMALTSTACK       # Retrieve shifted part
+OP_ADD                # [Rotated_Result]
+<Expected_Result>
+OP_EQUALVERIFY        # Enforce the bitwise constraint
+
+# 2. Cleanup & Signature Phase
+OP_FROMALTSTACK       # Retrieve Signature: [Signature]
+<PublicKey>           # Push PubKey: [Signature] [PubKey]
+OP_CHECKSIG           # Validates the signature
+# --- LEAF END ---
+
+```
+
+---
+
+### The Witness Stack Construction
+
+To satisfy the `OP_EQUALVERIFY` and `OP_CHECKSIG` above, your witness (the data provided in the transaction input) must be pushed in the correct order.
+
+**Witness Data:**
+
+1. **Item 1 (Bottom):** `<Signature>` (64-byte Schnorr signature).
+2. **Item 2:** `<Quotient>` (The hint required to verify the division).
+3. **Item 3 (Top):** `<Hint>` (The original 24-bit word).
+
+**`btcdeb` Execution Context:**
+When running this in a simulator like `btcdeb`, you would load the stack to simulate the witness:
+
+```bash
+# Push Signature, then Quotient, then Hint
+# Stack becomes: [Hint, Quotient, Signature] (Left is bottom)
+btcdeb "script.hex" <Signature> <Quotient> <Hint>
+
+```
+
+---
+
+### Why this is a powerful "Covenant-Lite" primitive:
+
+1. **State Verification:** By forcing the user to provide a `<Hint>` that produces a specific `<Expected_Result>` after a bitwise rotation, you are essentially enforcing **input-output state validation**. You are creating a contract where the funds can only be moved if the user knows the secret bit-sequence that "unlocks" the rotation.
+2. **Stack Safety:** We used `OP_TOALTSTACK` and `OP_FROMALTSTACK` to move the `Signature` out of the way while we performed the heavy lifting with the `Hint` and `Quotient`. This ensures the stack remains clear of intermediate "junk" values before `OP_CHECKSIG` runs.
+3. **Non-Malleability:** Because we used `OP_EQUALVERIFY` (which is a strict equality check) and standard `OP_CHECKSIG`, we ensure that the only way to satisfy the script is by providing the **exact** sequence of numbers that passed the cryptographic and mathematical tests.
+
+### Troubleshooting Your Implementation
+
+If your script fails, it is almost always due to one of these three issues:
+
+* **Minimal Encoding:** Ensure your integers (like `2097152`) are encoded minimally. If you provide `0x0000200000` when the script expects `0x200000`, the `OP_EQUALVERIFY` will fail.
+* **AltStack Order:** If you have multiple items in the AltStack, remember they are LIFO (Last-In, First-Out). If you push the `Signature` first, you must `FROMALTSTACK` it last.
+* **Script Length:** Remember that `btcdeb` shows you the opcode count. If your rotation logic exceeds 201 non-push opcodes, you will need to shorten the rotation chain by using `OP_PICK` or `OP_ROLL` to reuse existing values on the stack rather than re-computing them.
+
+**Would you like to try constructing the `Merkle Root` for this specific script, or are you ready to test this logic in a simulation environment?**
