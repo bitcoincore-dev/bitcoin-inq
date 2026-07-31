@@ -22,6 +22,7 @@ This repository is a Bitcoin Script research and examples collection, with most 
 
 # Key conventions
 
+- Prefer `bitcoin` and `bitcoincore-rpc` crate types and terminology when modeling networks, RPC auth, and chain selection.
 - Preserve the existing Markdown style: short section headings, inline links, fenced code blocks, and explicit warning/disclaimer text.
 - Keep Bitcoin Script examples and transaction hex verbatim unless the task explicitly requires changing them.
 - Maintain the existing tone of the docs: technical, example-driven, and focused on concrete script behavior.
