@@ -43,6 +43,10 @@ pub struct RpcArgs {
     /// Path to the cookie file for cookie auth.
     #[arg(long)]
     pub cookie_file: Option<PathBuf>,
+
+    /// Optional signet challenge marker to distinguish a custom signet chain.
+    #[arg(long)]
+    pub signet_challenge: Option<String>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -94,21 +98,22 @@ pub fn rpc_auth(args: &RpcArgs) -> Result<Auth> {
     }
 }
 
-pub fn detect_network(client: &Client) -> Result<NetworkKind> {
+pub fn detect_network(client: &Client) -> Result<NetworkKind> { detect_network_with_override(client, None) }
+
+pub fn detect_network_with_override(client: &Client, signet_challenge: Option<&str>) -> Result<NetworkKind> {
     let info = client.get_blockchain_info().context("failed to query blockchain info")?;
-    let network = match info.chain.as_str() {
-        "main" => NetworkKind::Mainnet,
-        "test" => NetworkKind::Testnet,
-        "testnet4" => NetworkKind::Testnet4,
-        "signet" => {
-            if info.signet_challenge.is_some() {
+    let network = match info.chain {
+        bitcoin::Network::Bitcoin => NetworkKind::Mainnet,
+        bitcoin::Network::Testnet => NetworkKind::Testnet,
+        bitcoin::Network::Testnet4 => NetworkKind::Testnet4,
+        bitcoin::Network::Signet => {
+            if signet_challenge.is_some() {
                 NetworkKind::CustomSignet
             } else {
                 NetworkKind::Signet
             }
         }
-        "regtest" => NetworkKind::Regtest,
-        other => NetworkKind::Unknown(other.to_owned()),
+        bitcoin::Network::Regtest => NetworkKind::Regtest,
     };
 
     Ok(network)
@@ -143,7 +148,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::DetectNetwork(args) => {
             let client = Client::new(&args.rpc_url, rpc_auth(&args)?)
                 .with_context(|| format!("failed to connect to {}", args.rpc_url))?;
-            let network = detect_network(&client)?;
+            let network = detect_network_with_override(&client, args.signet_challenge.as_deref())?;
             println!("{network}");
             Ok(())
         }
