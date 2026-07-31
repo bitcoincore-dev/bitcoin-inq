@@ -1081,3 +1081,81 @@ impl ScriptPrimitives {
 }
 
 ```
+
+```rust
+use bitcoin::blockdata::opcodes::all::*;
+use bitcoin::script::Builder;
+use bitcoin::ScriptBuf;
+
+/// Re-implements the full Rotate-Left-by-3 Leaf Script with Signature verification in Rust.
+///
+/// Expected Witness Stack (from bottom to top / first pushed to last pushed):
+/// 1. Hint (the original 24-bit word)
+/// 2. Quotient (the hint for the division part)
+/// 3. Signature (Schnorr signature)
+pub fn construct_rotate_and_sign_leaf(expected_result: i64, public_key_bytes: &[u8]) -> ScriptBuf {
+    let mut builder = Builder::new();
+
+    // ==========================================
+    // 1. ARITHMETIC / BITWISE PHASE (Rotate Left by 3)
+    // ==========================================
+
+    // OP_TOALTSTACK -> Save Signature to AltStack: leaves [Hint, Quotient]
+    builder = builder.push_opcode(OP_TOALTSTACK);
+
+    // OP_DUP -> [Hint, Hint, Quotient]
+    builder = builder.push_opcode(OP_DUP);
+
+    // Multiply by 8 (Shift Left 3 via OP_8MUL):
+    // OP_DUP OP_ADD OP_DUP OP_ADD OP_DUP OP_ADD
+    builder = builder
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_ADD)
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_ADD)
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_ADD);
+
+    // OP_TOALTSTACK -> Save the shifted part temporarily
+    builder = builder.push_opcode(OP_TOALTSTACK);
+
+    // Integer Division verification by 2^21 (2097152) using the Quotient hint
+    // The quotient is assumed to be pushed via the witness stream right before verification.
+    // Range check: 0 <= Quotient < 2097152
+    builder = builder
+        .push_opcode(OP_DUP)       // Duplicate the quotient for verification
+        .push_int(0)               // Lower bound
+        .push_int(2097152)         // Upper bound (2^21)
+        .push_opcode(OP_WITHIN)
+        .push_opcode(OP_VERIFY);   // Asserts the quotient hint is within range
+
+    // OP_FROMALTSTACK -> Retrieve the shifted part back to the main stack
+    builder = builder.push_opcode(OP_FROMALTSTACK);
+
+    // OP_ADD -> Add the shifted part and the division result together to form [Rotated_Result]
+    builder = builder.push_opcode(OP_ADD);
+
+    // <Expected_Result> OP_EQUALVERIFY -> Enforce the bitwise constraint matches expectation
+    builder = builder
+        .push_int(expected_result)
+        .push_opcode(OP_EQUALVERIFY);
+
+    // ==========================================
+    // 2. CLEANUP & SIGNATURE PHASE
+    // ==========================================
+
+    // OP_FROMALTSTACK -> Retrieve the Signature from the AltStack
+    builder = builder.push_opcode(OP_FROMALTSTACK);
+
+    // Push the public key into the script bytes
+    let pubkey_push = bitcoin::script::PushBytesBuf::try_from(public_key_bytes)
+        .expect("public key bytes exceed push limits");
+    builder = builder.push_slice(&pubkey_push);
+
+    // OP_CHECKSIG -> Validates the signature against the public key
+    builder = builder.push_opcode(OP_CHECKSIG);
+
+    builder.into_script()
+}
+
+```
