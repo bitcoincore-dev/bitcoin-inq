@@ -7,3 +7,6 @@
 [submodule "bips"]
 	path = bips
 	url = https://github.com/bitcoin/bips.git
+[submodule "inquisition"]
+	path = inquisition
+	url = https://github.com/bitcoin-inquisition/binana.git
