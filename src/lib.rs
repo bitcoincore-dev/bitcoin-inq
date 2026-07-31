@@ -1,7 +1,13 @@
-use std::path::{Path, PathBuf};
-use std::process::Command;
+//! CLI helpers for Bitcoin Core and Bitcoin Inquisition releases.
+//!
+//! The binary exposes small workflows for starting nodes, mining regtest
+//! coins, detecting the active chain over RPC, and installing Inquisition
+//! release assets.
+
 use std::fs;
 use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{Context, Result};
 use bitcoin::address::{Address, NetworkUnchecked};
@@ -95,7 +101,7 @@ pub struct InquisitionArgs {
     #[arg(short = 'f', long)]
     pub force: bool,
 
-    /// Also install binaries into a PATH directory with an -inq suffix.
+    /// Also install `bitcoin-qt`, `bitcoind`, and `bitcoin-cli` into PATH with an `-inq` suffix.
     #[arg(long, default_value_t = true)]
     pub path: bool,
 
@@ -110,7 +116,7 @@ pub struct InquisitionArgs {
 
 #[derive(Debug, Args, Clone)]
 pub struct RpcArgs {
-    /// RPC endpoint, for example http://127.0.0.1:8332
+    /// RPC endpoint, for example http://127.0.0.1:8332.
     #[arg(long)]
     pub rpc_url: Option<String>,
 
@@ -137,7 +143,7 @@ pub struct NodeStartArgs {
     #[arg(long, value_enum, default_value_t = ChainSelection::Regtest)]
     pub chain: ChainSelection,
 
-    /// Bitcoin Core config file.
+    /// Bitcoin Core config file path relative to the selected data directory.
     #[arg(long, default_value = "bitcoin.conf")]
     pub conf: PathBuf,
 
@@ -153,7 +159,7 @@ pub struct NodeStartArgs {
     #[arg(long, default_value_t = false)]
     pub foreground: bool,
 
-    /// Start the GUI instead of bitcoind.
+    /// Start the GUI instead of `bitcoind`.
     #[arg(long, default_value_t = false)]
     pub gui: bool,
 
@@ -168,7 +174,7 @@ pub struct MineArgs {
     #[command(flatten)]
     pub rpc: RpcArgs,
 
-    /// Number of blocks to mine.
+    /// Number of regtest blocks to mine.
     #[arg(long, default_value_t = 101)]
     pub blocks: u64,
 
@@ -227,6 +233,7 @@ impl std::fmt::Display for NetworkKind {
     }
 }
 
+/// Build RPC authentication from explicit flags.
 pub fn rpc_auth(args: &RpcArgs) -> Result<Auth> {
     if let Some(cookie_file) = &args.cookie_file {
         return Ok(Auth::CookieFile(cookie_file.clone()));
@@ -254,7 +261,10 @@ fn default_cookie_paths() -> Vec<PathBuf> {
         ]);
 
         if cfg!(target_os = "macos") {
-            let app_support = home.join("Library").join("Application Support").join("Bitcoin");
+            let app_support = home
+                .join("Library")
+                .join("Application Support")
+                .join("Bitcoin");
             paths.extend([
                 app_support.join(".cookie"),
                 app_support.join("testnet3").join(".cookie"),
@@ -291,10 +301,10 @@ fn rpc_client_auto() -> Result<Client> {
                 continue;
             }
 
-            if let Ok(client) = Client::new(&rpc_url, Auth::CookieFile(cookie.clone())) {
-                if client.get_blockchain_info().is_ok() {
-                    return Ok(client);
-                }
+            if let Ok(client) = Client::new(&rpc_url, Auth::CookieFile(cookie.clone()))
+                && client.get_blockchain_info().is_ok()
+            {
+                return Ok(client);
             }
         }
     }
@@ -306,7 +316,8 @@ fn rpc_client_auto() -> Result<Client> {
 
 fn rpc_client_from_args(args: &RpcArgs) -> Result<Client> {
     if let Some(rpc_url) = &args.rpc_url {
-        Client::new(rpc_url, rpc_auth(args)?).with_context(|| format!("failed to connect to {rpc_url}"))
+        Client::new(rpc_url, rpc_auth(args)?)
+            .with_context(|| format!("failed to connect to {rpc_url}"))
     } else {
         rpc_client_auto()
     }
@@ -340,10 +351,19 @@ fn resolved_conf_file(datadir: &Path, conf_arg: &Path) -> PathBuf {
     }
 }
 
-pub fn detect_network(client: &Client) -> Result<NetworkKind> { detect_network_with_override(client, None) }
+/// Detect the chain for an already-configured RPC client.
+pub fn detect_network(client: &Client) -> Result<NetworkKind> {
+    detect_network_with_override(client, None)
+}
 
-pub fn detect_network_with_override(client: &Client, signet_challenge: Option<&str>) -> Result<NetworkKind> {
-    let info = client.get_blockchain_info().context("failed to query blockchain info")?;
+/// Detect the active chain and classify custom signets when a challenge is supplied.
+pub fn detect_network_with_override(
+    client: &Client,
+    signet_challenge: Option<&str>,
+) -> Result<NetworkKind> {
+    let info = client
+        .get_blockchain_info()
+        .context("failed to query blockchain info")?;
     let network = match info.chain {
         bitcoin::Network::Bitcoin => NetworkKind::Mainnet,
         bitcoin::Network::Testnet => NetworkKind::Testnet,
@@ -361,6 +381,7 @@ pub fn detect_network_with_override(client: &Client, signet_challenge: Option<&s
     Ok(network)
 }
 
+/// Terminate a process by PID.
 pub fn kill_process(pid: u32, force: bool) -> Result<()> {
     let status = if cfg!(windows) {
         let mut cmd = Command::new("taskkill");
@@ -394,7 +415,11 @@ pub struct ProcessInfo {
 fn process_name_matches(name: &str, filter: &str, contains: bool) -> bool {
     let name = name.to_ascii_lowercase();
     let filter = filter.to_ascii_lowercase();
-    if contains { name.contains(&filter) } else { name == filter }
+    if contains {
+        name.contains(&filter)
+    } else {
+        name == filter
+    }
 }
 
 fn process_name_from_path(path: &str) -> &str {
@@ -426,7 +451,11 @@ fn list_processes_os() -> Result<Vec<ProcessInfo>> {
             Some(pid) => pid,
             None => continue,
         };
-        let name = parts.next().map(process_name_from_path).unwrap_or(trimmed).to_string();
+        let name = parts
+            .next()
+            .map(process_name_from_path)
+            .unwrap_or(trimmed)
+            .to_string();
         processes.push(ProcessInfo { pid, name });
     }
 
@@ -470,6 +499,7 @@ fn list_processes_os() -> Result<Vec<ProcessInfo>> {
     Ok(processes)
 }
 
+/// List running processes, optionally filtered by name.
 pub fn list_processes(name: Option<&str>, contains: bool) -> Result<Vec<ProcessInfo>> {
     let processes = list_processes_os()?;
     Ok(match name {
@@ -481,16 +511,31 @@ pub fn list_processes(name: Option<&str>, contains: bool) -> Result<Vec<ProcessI
     })
 }
 
+/// Find the preferred `bitcoind` binary on PATH.
 pub fn bitcoind_binary() -> Result<PathBuf> {
-    find_executable(&["bitcoind-inq", "bitcoind", "bitcoind.exe", "Bitcoin-Qt", "Bitcoin-Qt.exe"])
-        .ok_or_else(|| anyhow::anyhow!("could not find bitcoind on PATH"))
+    find_executable(&[
+        "bitcoind-inq",
+        "bitcoind",
+        "bitcoind.exe",
+        "Bitcoin-Qt",
+        "Bitcoin-Qt.exe",
+    ])
+    .ok_or_else(|| anyhow::anyhow!("could not find bitcoind on PATH"))
 }
 
+/// Find the preferred `bitcoin-qt` binary on PATH.
 pub fn bitcoin_qt_binary() -> Result<PathBuf> {
-    find_executable(&["bitcoin-qt-inq", "bitcoin-qt", "bitcoin-qt.exe", "Bitcoin-Qt", "Bitcoin-Qt.exe"])
-        .ok_or_else(|| anyhow::anyhow!("could not find bitcoin-qt on PATH"))
+    find_executable(&[
+        "bitcoin-qt-inq",
+        "bitcoin-qt",
+        "bitcoin-qt.exe",
+        "Bitcoin-Qt",
+        "Bitcoin-Qt.exe",
+    ])
+    .ok_or_else(|| anyhow::anyhow!("could not find bitcoin-qt on PATH"))
 }
 
+/// Find the preferred `bitcoin-cli` binary on PATH.
 pub fn bitcoin_cli_binary() -> Result<PathBuf> {
     find_executable(&["bitcoin-cli-inq", "bitcoin-cli", "bitcoin-cli.exe"])
         .ok_or_else(|| anyhow::anyhow!("could not find bitcoin-cli on PATH"))
@@ -537,7 +582,10 @@ fn gh_exists() -> bool {
 fn fetch_release_list() -> Result<Vec<GitHubRelease>> {
     let output = if gh_exists() {
         Command::new("gh")
-            .args(["api", "repos/bitcoin-inquisition/bitcoin/releases?per_page=100"])
+            .args([
+                "api",
+                "repos/bitcoin-inquisition/bitcoin/releases?per_page=100",
+            ])
             .output()
             .context("failed to invoke gh")?
     } else {
@@ -554,7 +602,7 @@ fn fetch_release_list() -> Result<Vec<GitHubRelease>> {
         return Err(anyhow::anyhow!("failed to fetch Inquisition release list"));
     }
 
-    Ok(serde_json::from_slice(&output.stdout).context("failed to parse release list")?)
+    serde_json::from_slice(&output.stdout).context("failed to parse release list")
 }
 
 fn normalize_tag(tag: &str) -> String {
@@ -603,7 +651,11 @@ fn inquisition_asset_name(tag: &str) -> Result<String> {
         ("macos", "x86_64") => "x86_64-apple-darwin-unsigned.tar.gz",
         ("macos", "aarch64") | ("macos", "arm64") => "arm64-apple-darwin-unsigned.tar.gz",
         ("windows", "x86_64") => "win64-codesigning.tar.gz",
-        _ => return Err(anyhow::anyhow!("unsupported platform for Inquisition release assets")),
+        _ => {
+            return Err(anyhow::anyhow!(
+                "unsupported platform for Inquisition release assets"
+            ));
+        }
     };
 
     Ok(format!("bitcoin-{version}-{suffix}"))
@@ -665,7 +717,12 @@ fn curl_download(url: &str, file: &Path) -> Result<()> {
     }
 }
 
-fn extract_inquisition_archive(archive: &Path, dir: &Path, tag: &str, force: bool) -> Result<PathBuf> {
+fn extract_inquisition_archive(
+    archive: &Path,
+    dir: &Path,
+    tag: &str,
+    force: bool,
+) -> Result<PathBuf> {
     let file = fs::File::open(archive).context("failed to open downloaded archive")?;
     let gz = GzDecoder::new(file);
     let mut archive = Archive::new(gz);
@@ -673,11 +730,14 @@ fn extract_inquisition_archive(archive: &Path, dir: &Path, tag: &str, force: boo
     if force {
         let release_dir = dir.join(inquisition_release_dir(tag));
         if release_dir.exists() {
-            fs::remove_dir_all(&release_dir).context("failed to remove existing release directory")?;
+            fs::remove_dir_all(&release_dir)
+                .context("failed to remove existing release directory")?;
         }
     }
 
-    archive.unpack(dir).context("failed to extract release archive")?;
+    archive
+        .unpack(dir)
+        .context("failed to extract release archive")?;
     Ok(dir.join(inquisition_release_dir(tag)))
 }
 
@@ -707,7 +767,11 @@ fn is_dir_writable(dir: &Path) -> bool {
             .unwrap_or_default()
     ));
 
-    match fs::OpenOptions::new().write(true).create_new(true).open(&marker) {
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&marker)
+    {
         Ok(_) => {
             let _ = fs::remove_file(&marker);
             true
@@ -724,7 +788,9 @@ fn first_writable_path_dir() -> Result<PathBuf> {
         }
     }
 
-    Err(anyhow::anyhow!("could not find a writable directory in PATH"))
+    Err(anyhow::anyhow!(
+        "could not find a writable directory in PATH"
+    ))
 }
 
 fn install_binary_into_path(source: &Path, path_dir: &Path, force: bool) -> Result<PathBuf> {
@@ -761,7 +827,11 @@ fn install_binary_into_path(source: &Path, path_dir: &Path, force: bool) -> Resu
     Ok(destination)
 }
 
-fn ensure_node_config(chain: ChainSelection, conf_path: &Path, signetchallenge: Option<&str>) -> Result<()> {
+fn ensure_node_config(
+    chain: ChainSelection,
+    conf_path: &Path,
+    signetchallenge: Option<&str>,
+) -> Result<()> {
     if conf_path.exists() {
         return Ok(());
     }
@@ -776,10 +846,12 @@ fn ensure_node_config(chain: ChainSelection, conf_path: &Path, signetchallenge: 
         ChainSelection::Regtest => regtest_config_template(),
         _ => return Ok(()),
     };
-    file.write_all(template.as_bytes()).context("failed to write node config")?;
+    file.write_all(template.as_bytes())
+        .context("failed to write node config")?;
     Ok(())
 }
 
+/// Download and optionally install an Inquisition release asset.
 pub fn install_inquisition(
     version: Option<&str>,
     dir: &Path,
@@ -842,6 +914,7 @@ pub fn install_inquisition(
     Ok(target_file)
 }
 
+/// Start a Bitcoin Core or Bitcoin Inquisition node with chain-aware defaults.
 pub fn start_node(args: NodeStartArgs) -> Result<()> {
     if args.chain != ChainSelection::Signet && args.signetchallenge.is_some() {
         return Err(anyhow::anyhow!(
@@ -856,7 +929,11 @@ pub fn start_node(args: NodeStartArgs) -> Result<()> {
         ensure_node_config(args.chain, &conf_path, args.signetchallenge.as_deref())?;
     }
 
-    let node_binary = if args.gui { bitcoin_qt_binary()? } else { bitcoind_binary()? };
+    let node_binary = if args.gui {
+        bitcoin_qt_binary()?
+    } else {
+        bitcoind_binary()?
+    };
     let mut command = Command::new(&node_binary);
     if let Some(flag) = args.chain.cli_flag() {
         command.arg(flag);
@@ -893,15 +970,19 @@ pub fn start_node(args: NodeStartArgs) -> Result<()> {
     }
 }
 
+/// Stop a running node using RPC.
 pub fn stop_node(args: RpcArgs) -> Result<()> {
     let client = rpc_client_from_args(&args)?;
     client.stop().context("failed to stop node")?;
     Ok(())
 }
 
+/// Mine regtest blocks to a wallet or supplied address.
 pub fn mine_blocks(args: MineArgs) -> Result<()> {
     let client = rpc_client_from_args(&args.rpc)?;
-    let info = client.get_blockchain_info().context("failed to query blockchain info")?;
+    let info = client
+        .get_blockchain_info()
+        .context("failed to query blockchain info")?;
 
     if info.chain != bitcoin::Network::Regtest {
         return Err(anyhow::anyhow!(
@@ -936,6 +1017,7 @@ pub fn mine_blocks(args: MineArgs) -> Result<()> {
     Ok(())
 }
 
+/// Dispatch a parsed CLI invocation.
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Node(node) => match node.command {
@@ -998,6 +1080,7 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 }
 
+/// Auto-detect the local node and report its chain.
 pub fn detect_network_auto(signet_challenge: Option<&str>) -> Result<NetworkKind> {
     let client = rpc_client_auto()?;
     detect_network_with_override(&client, signet_challenge)
@@ -1032,13 +1115,19 @@ mod tests {
     fn matches_process_names() {
         assert!(process_name_matches("bitcoind", "bitcoind", false));
         assert!(process_name_matches("bitcoind", "bitcoin", true));
-        assert_eq!(process_name_from_path("/usr/local/bin/bitcoind"), "bitcoind");
+        assert_eq!(
+            process_name_from_path("/usr/local/bin/bitcoind"),
+            "bitcoind"
+        );
     }
 
     #[test]
     fn aliases_binary_names() {
         assert_eq!(alias_name_for_binary("bitcoin-qt"), "bitcoin-qt-inq");
-        assert_eq!(alias_name_for_binary("bitcoin-qt.exe"), "bitcoin-qt-inq.exe");
+        assert_eq!(
+            alias_name_for_binary("bitcoin-qt.exe"),
+            "bitcoin-qt-inq.exe"
+        );
     }
 
     #[test]

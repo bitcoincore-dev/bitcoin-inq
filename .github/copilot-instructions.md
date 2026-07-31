@@ -1,6 +1,6 @@
 # Repository overview
 
-This repository is a Bitcoin Script research and examples collection, with most of the content living in Markdown documents under `coins/bitcoin-scripts/`. The root Rust crate in `src/` is only a minimal scaffold.
+This repository is a Bitcoin Script research and examples collection, with most of the content living in Markdown documents under `coins/bitcoin-scripts/`. The root Rust crate in `src/` now provides a small CLI for node start/stop, regtest mining, network detection, and Inquisition release installation.
 
 `coins/bitcoin-scripts` and `mr-zwets/Composite-Arithmetic-Opcodes` are git submodules. Treat them as external upstream content unless you explicitly intend to update the submodule contents or pointer.
 
@@ -18,7 +18,7 @@ This repository is a Bitcoin Script research and examples collection, with most 
 - Many files are standalone writeups with embedded script fragments, raw transaction hex, btcdeb sessions, images, and external references.
 - `coins/bitcoin-scripts/` contains the main script examples and explanations.
 - `mr-zwets/Composite-Arithmetic-Opcodes/` contains the CHIP/specification material and CashScript examples for composite arithmetic opcodes.
-- `src/` is a placeholder Rust crate and is not the main product of the repo.
+- `src/` is a lightweight Rust CLI that shells into Bitcoin Core / Bitcoin Inquisition workflows and uses `bitcoin` / `bitcoincore-rpc` types for chain handling.
 
 # Key conventions
 
