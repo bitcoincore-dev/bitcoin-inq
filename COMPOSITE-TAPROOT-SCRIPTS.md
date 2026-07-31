@@ -726,3 +726,88 @@ OP_FROMALTSTACK                   # Retrieve Signature
 3. **Limits:** If you add more complex branches to your Merkle tree, the Merkle path in your witness will grow, but the **size of the leaf script** itself remains fixed, keeping your transaction fees predictable.
 
 Would you like to explore how to serialize the **Control Block** for this Merkle tree, or are you focused on further refining the arithmetic primitives?
+
+This is a comprehensive summary of the composite opcode primitives we have discussed.
+
+**DISCLAIMER:** These are educational examples of how to chain Bitcoin Script opcodes. Do not use experimental or complex custom logic in production Bitcoin environments.
+
+---
+
+### 1. Arithmetic Primitives (Multiplication)
+
+* **OP_2MUL:** `OP_DUP OP_ADD`
+* **OP_4MUL:** `OP_DUP OP_ADD OP_DUP OP_ADD`
+* **OP_8MUL:** `OP_DUP OP_ADD OP_DUP OP_ADD OP_DUP OP_ADD`
+* **OP_5MUL:** `OP_DUP OP_4MUL OP_ADD`
+* **OP_13MUL:**
+`OP_DUP OP_TOALTSTACK OP_8MUL OP_FROMALTSTACK OP_DUP OP_TOALTSTACK OP_4MUL OP_FROMALTSTACK OP_DUP OP_TOALTSTACK OP_ADD OP_ADD OP_ADD`
+
+---
+
+### 2. Division and Modulo (Hint-Based)
+
+These require an unlocking witness to provide a "hint" (the quotient), which the script then verifies.
+
+* **OP_2DIV:**
+`OP_OVER OP_DUP OP_ADD OP_SUB OP_DUP OP_0NOTEQUAL OP_EQUALVERIFY`
+* **OP_2MOD:**
+`OP_SWAP OP_DUP OP_ADD OP_SUB OP_DUP OP_DUP OP_0NOTEQUAL OP_EQUALVERIFY`
+* **OP_8DIV:**
+`OP_DUP OP_DUP OP_ADD OP_DUP OP_ADD OP_DUP OP_ADD <Const> OP_SWAP OP_SUB 0 8 OP_WITHIN OP_VERIFY`
+* **OP_8DIV_REM:** Returns result and remainder.
+`OP_DUP OP_DUP OP_ADD OP_DUP OP_ADD OP_DUP OP_ADD <Const> OP_SWAP OP_SUB OP_DUP 0 8 OP_WITHIN OP_VERIFY`
+
+---
+
+### 3. Boolean & Logical Operators
+
+* **OP_BOOLXOR:**
+`OP_2DUP OP_NOT OP_BOOLAND OP_TOALTSTACK OP_SWAP OP_NOT OP_BOOLAND OP_FROMALTSTACK OP_BOOLOR`
+* **Non-Malleable Boolean:** Ensures input is exactly 1 or 0.
+`OP_DUP OP_SIZE OP_EQUALVERIFY`
+
+---
+
+### 4. Bitwise Operations
+
+* **OP_LSHIFT:**
+`OP_ABS OP_DUP 0xffffff3f OP_GREATERTHAN OP_IF 0x00000040 OP_SUB OP_DUP OP_ADD OP_NEGATE OP_ELSE OP_DUP OP_ADD OP_ENDIF`
+* **Bitwise Complement (32-bit):**
+`OP_DUP OP_ABS OP_TUCK OP_NUMNOTEQUAL OP_SWAP 0xffffff7f OP_SWAP OP_SUB OP_SWAP OP_NOTIF OP_NEGATE OP_ENDIF`
+* **Nullify First 8 bits (32-bit):**
+`OP_ABS` followed by repeated `DUP <2^n> GREATERTHANOREQUAL IF <2^n> SUB ENDIF` blocks for $n=30$ down to $24$.
+
+---
+
+### 5. Signature & Flow Control
+
+* **OP_IFSIGSIZE:** Controls program flow based on signature length.
+`OP_DUP OP_TOALTSTACK OP_CHECKSIGVERIFY OP_FROMALTSTACK OP_SIZE OP_TOALTSTACK OP_DROP ...`
+* **OP_SIGCOMMITMENT:** Checks a hash commitment to a signature (requires SIGHASH_NOINPUT/future covenant support).
+`OP_DUP OP_TOALTSTACK OP_SHA256 <commitment> OP_VERIFY`
+
+---
+
+### 6. Stack & Array Manipulation
+
+* **OP_2SORT:** Sort the top two items.
+`2DUP OP_MAX OP_TOALTSTACK OP_MIN OP_FROMALTSTACK`
+* **Pick Bottom Item:**
+`OP_DEPTH OP_1SUB OP_PICK`
+* **Roll Bottom Item:**
+`OP_DEPTH OP_1SUB OP_ROLL`
+* **Absolute Value (OP_ABS):**
+`OP_DUP 0 OP_LESSTHAN OP_IF OP_NEGATE OP_ENDIF`
+* **Clamping (Min/Max):**
+`<Upper_Bound> OP_MIN <Lower_Bound> OP_MAX`
+
+---
+
+### 7. Time & Verification Primitives
+
+* **Minimum Block Height:**
+`OP_DUP <Height_Hex> OP_LESSTHAN OP_CHECKLOCKTIMEVERIFY`
+* **Verify Binary Representation:**
+Iterative `OP_SWAP OP_IF <Power_of_2> OP_ADD OP_ENDIF` for each bit position.
+
+Would you like to explore how to optimize any of these specific primitives for a more complex contract, or are you ready to assemble these into a functional project?
