@@ -108,13 +108,17 @@ pub struct NodeStartArgs {
     #[arg(long, value_enum, default_value_t = ChainSelection::Testnet4)]
     pub chain: ChainSelection,
 
+    /// Bitcoin Core config file.
+    #[arg(long, default_value = ".bitcoin/bitcoin.conf")]
+    pub conf: PathBuf,
+
     /// Signet challenge for custom signet networks.
     #[arg(long)]
     pub signetchallenge: Option<String>,
 
     /// Data directory for bitcoind.
-    #[arg(long)]
-    pub datadir: Option<PathBuf>,
+    #[arg(long, default_value = ".bitcoin")]
+    pub datadir: PathBuf,
 
     /// Run in the foreground instead of daemonizing.
     #[arg(long, default_value_t = false)]
@@ -461,10 +465,8 @@ pub fn start_node(args: NodeStartArgs) -> Result<()> {
     let bitcoind = bitcoind_binary()?;
     let mut command = Command::new(&bitcoind);
     command.arg(format!("-chain={}", args.chain.network().to_core_arg()));
-
-    if let Some(datadir) = &args.datadir {
-        command.arg(format!("-datadir={}", datadir.display()));
-    }
+    command.arg(format!("-conf={}", args.conf.display()));
+    command.arg(format!("-datadir={}", args.datadir.display()));
 
     if let Some(challenge) = &args.signetchallenge {
         command.arg(format!("-signetchallenge={challenge}"));
