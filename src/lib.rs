@@ -71,7 +71,7 @@ pub struct NodeArgs {
 #[derive(Debug, Args)]
 pub struct InquisitionArgs {
     /// Install the given release tag or version (for example v29.4-inq or 29.4-inq).
-    #[arg(long)]
+    #[arg(long, num_args = 0..=1, default_missing_value = "empty")]
     pub install: Option<String>,
 
     /// Destination directory for the downloaded release asset.
@@ -453,6 +453,10 @@ fn normalize_tag(tag: &str) -> String {
     tag.strip_prefix('v').unwrap_or(tag).to_owned()
 }
 
+fn is_version_list_request(version: Option<&str>) -> bool {
+    matches!(version.map(str::trim), Some("") | Some("empty"))
+}
+
 fn resolve_release_tag(requested: Option<&str>, releases: &[GitHubRelease]) -> Result<String> {
     if let Some(requested) = requested {
         if requested == "latest" {
@@ -536,6 +540,16 @@ fn curl_download(url: &str, file: &Path) -> Result<()> {
 
 pub fn install_inquisition(version: Option<&str>, dir: Option<&Path>, dry_run: bool) -> Result<PathBuf> {
     let releases = fetch_release_list()?;
+
+    if is_version_list_request(version) {
+        for release in &releases {
+            println!("{}", release.tag_name);
+        }
+        return Ok(dir
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))));
+    }
+
     let tag = resolve_release_tag(version, &releases)?;
     let asset_name = inquisition_asset_name(&tag)?;
     let target_dir = dir
@@ -660,7 +674,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Inquisition(args) => {
             let dry_run = args.dry_run;
             let path = install_inquisition(args.install.as_deref(), args.dir.as_deref(), dry_run)?;
-            if !dry_run {
+            if !dry_run && !is_version_list_request(args.install.as_deref()) {
                 println!("{}", path.display());
             }
             Ok(())
