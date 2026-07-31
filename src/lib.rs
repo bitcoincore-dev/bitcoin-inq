@@ -1,10 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::fs;
 
 use anyhow::{Context, Result};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use flate2::read::GzDecoder;
 use serde::Deserialize;
+use tar::Archive;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum SignalKind {
@@ -77,6 +80,10 @@ pub struct InquisitionArgs {
     /// Overwrite an existing downloaded asset.
     #[arg(short = 'f', long)]
     pub force: bool,
+
+    /// Also install binaries into a PATH directory with an -inq suffix.
+    #[arg(long, default_value_t = true)]
+    pub path: bool,
 
     /// Destination directory for the downloaded release asset.
     #[arg(long, default_value = ".")]
@@ -505,6 +512,10 @@ fn inquisition_asset_name(tag: &str) -> Result<String> {
     Ok(format!("bitcoin-{version}-{suffix}"))
 }
 
+fn inquisition_release_dir(tag: &str) -> String {
+    format!("bitcoin-{}", normalize_tag(tag))
+}
+
 fn gh_release_download(tag: &str, asset_name: &str, dir: &Path) -> Result<PathBuf> {
     let status = Command::new("gh")
         .args([
@@ -542,7 +553,109 @@ fn curl_download(url: &str, file: &Path) -> Result<()> {
     }
 }
 
-pub fn install_inquisition(version: Option<&str>, dir: &Path, force: bool, dry_run: bool) -> Result<PathBuf> {
+fn extract_inquisition_archive(archive: &Path, dir: &Path, tag: &str, force: bool) -> Result<PathBuf> {
+    let file = fs::File::open(archive).context("failed to open downloaded archive")?;
+    let gz = GzDecoder::new(file);
+    let mut archive = Archive::new(gz);
+
+    if force {
+        let release_dir = dir.join(inquisition_release_dir(tag));
+        if release_dir.exists() {
+            fs::remove_dir_all(&release_dir).context("failed to remove existing release directory")?;
+        }
+    }
+
+    archive.unpack(dir).context("failed to extract release archive")?;
+    Ok(dir.join(inquisition_release_dir(tag)))
+}
+
+fn alias_name_for_binary(binary: &str) -> String {
+    let path = Path::new(binary);
+    let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(binary);
+    let alias = format!("{stem}-inq");
+    if ext.is_empty() {
+        alias
+    } else {
+        format!("{alias}.{ext}")
+    }
+}
+
+fn is_dir_writable(dir: &Path) -> bool {
+    if !dir.is_dir() {
+        return false;
+    }
+
+    let marker = dir.join(format!(
+        ".p2trc-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    ));
+
+    match fs::OpenOptions::new().write(true).create_new(true).open(&marker) {
+        Ok(_) => {
+            let _ = fs::remove_file(&marker);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn first_writable_path_dir() -> Result<PathBuf> {
+    let path = std::env::var_os("PATH").ok_or_else(|| anyhow::anyhow!("PATH is not set"))?;
+    for dir in std::env::split_paths(&path) {
+        if is_dir_writable(&dir) {
+            return Ok(dir);
+        }
+    }
+
+    Err(anyhow::anyhow!("could not find a writable directory in PATH"))
+}
+
+fn install_binary_into_path(source: &Path, path_dir: &Path, force: bool) -> Result<PathBuf> {
+    let file_name = source
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| anyhow::anyhow!("invalid binary name"))?;
+    let alias = alias_name_for_binary(file_name);
+    let destination = path_dir.join(alias);
+
+    if destination.exists() {
+        if force {
+            fs::remove_file(&destination).context("failed to remove existing PATH entry")?;
+        } else {
+            return Err(anyhow::anyhow!(
+                "PATH entry already exists: {}",
+                destination.display()
+            ));
+        }
+    }
+
+    fs::copy(source, &destination).context("failed to copy binary into PATH")?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&destination)
+            .context("failed to read copied binary permissions")?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&destination, perms).context("failed to set executable permissions")?;
+    }
+
+    Ok(destination)
+}
+
+pub fn install_inquisition(
+    version: Option<&str>,
+    dir: &Path,
+    force: bool,
+    dry_run: bool,
+    install_path: bool,
+) -> Result<PathBuf> {
     let releases = fetch_release_list()?;
 
     if is_version_list_request(version) {
@@ -579,11 +692,23 @@ pub fn install_inquisition(version: Option<&str>, dir: &Path, force: bool, dry_r
     }
 
     if gh_exists() {
-        gh_release_download(&tag, &asset.name, &target_dir)
+        gh_release_download(&tag, &asset.name, &target_dir)?;
     } else {
         curl_download(&asset.browser_download_url, &target_file)?;
-        Ok(target_file)
     }
+
+    let extracted_dir = extract_inquisition_archive(&target_file, &target_dir, &tag, force)?;
+    if install_path {
+        let path_dir = first_writable_path_dir()?;
+        for binary in ["bitcoin-qt", "bitcoind", "bitcoin-cli"] {
+            let source = extracted_dir.join("bin").join(binary);
+            if source.exists() {
+                let installed = install_binary_into_path(&source, &path_dir, force)?;
+                println!("{}", installed.display());
+            }
+        }
+    }
+    Ok(target_file)
 }
 
 pub fn start_node(args: NodeStartArgs) -> Result<()> {
@@ -676,7 +801,13 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Commands::Inquisition(args) => {
             let dry_run = args.dry_run;
-            let path = install_inquisition(args.install.as_deref(), &args.dir, args.force, dry_run)?;
+            let path = install_inquisition(
+                args.install.as_deref(),
+                &args.dir,
+                args.force,
+                dry_run,
+                args.path,
+            )?;
             if !dry_run && !is_version_list_request(args.install.as_deref()) {
                 println!("{}", path.display());
             }
@@ -770,5 +901,18 @@ mod tests {
         assert!(process_name_matches("bitcoind", "bitcoind", false));
         assert!(process_name_matches("bitcoind", "bitcoin", true));
         assert_eq!(process_name_from_path("/usr/local/bin/bitcoind"), "bitcoind");
+    }
+
+    #[test]
+    fn aliases_binary_names() {
+        assert_eq!(alias_name_for_binary("bitcoin-qt"), "bitcoin-qt-inq");
+        assert_eq!(alias_name_for_binary("bitcoin-qt.exe"), "bitcoin-qt-inq.exe");
+    }
+
+    #[test]
+    fn recognizes_version_list_request() {
+        assert!(is_version_list_request(Some("")));
+        assert!(is_version_list_request(Some("empty")));
+        assert!(!is_version_list_request(Some("v29.4-inq")));
     }
 }
