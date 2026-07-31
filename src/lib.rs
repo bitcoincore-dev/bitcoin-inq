@@ -139,6 +139,10 @@ pub struct NodeStartArgs {
     #[arg(long, default_value_t = false)]
     pub foreground: bool,
 
+    /// Start the GUI instead of bitcoind.
+    #[arg(long, default_value_t = false)]
+    pub gui: bool,
+
     /// Print the command instead of executing it.
     #[arg(long, default_value_t = false)]
     pub dry_run: bool,
@@ -392,6 +396,11 @@ pub fn list_processes(name: Option<&str>, contains: bool) -> Result<Vec<ProcessI
 pub fn bitcoind_binary() -> Result<PathBuf> {
     find_executable(&["bitcoind-inq", "bitcoind", "bitcoind.exe", "Bitcoin-Qt", "Bitcoin-Qt.exe"])
         .ok_or_else(|| anyhow::anyhow!("could not find bitcoind on PATH"))
+}
+
+pub fn bitcoin_qt_binary() -> Result<PathBuf> {
+    find_executable(&["bitcoin-qt-inq", "bitcoin-qt", "bitcoin-qt.exe", "Bitcoin-Qt", "Bitcoin-Qt.exe"])
+        .ok_or_else(|| anyhow::anyhow!("could not find bitcoin-qt on PATH"))
 }
 
 pub fn bitcoin_cli_binary() -> Result<PathBuf> {
@@ -718,8 +727,8 @@ pub fn start_node(args: NodeStartArgs) -> Result<()> {
         ));
     }
 
-    let bitcoind = bitcoind_binary()?;
-    let mut command = Command::new(&bitcoind);
+    let node_binary = if args.gui { bitcoin_qt_binary()? } else { bitcoind_binary()? };
+    let mut command = Command::new(&node_binary);
     command.arg(format!("-chain={}", args.chain.network().to_core_arg()));
     command.arg(format!("-conf={}", args.conf.display()));
     command.arg(format!("-datadir={}", args.datadir.display()));
@@ -728,14 +737,14 @@ pub fn start_node(args: NodeStartArgs) -> Result<()> {
         command.arg(format!("-signetchallenge={challenge}"));
     }
 
-    if !args.foreground {
+    if !args.gui && !args.foreground {
         command.arg("-daemon");
     }
 
     if args.dry_run {
         println!(
             "{} {}",
-            bitcoind.display(),
+            node_binary.display(),
             command
                 .get_args()
                 .map(|arg| arg.to_string_lossy().into_owned())
@@ -745,11 +754,11 @@ pub fn start_node(args: NodeStartArgs) -> Result<()> {
         return Ok(());
     }
 
-    let status = command.status().context("failed to invoke bitcoind")?;
+    let status = command.status().context("failed to invoke node binary")?;
     if status.success() {
         Ok(())
     } else {
-        Err(anyhow::anyhow!("bitcoind exited with a non-zero status"))
+        Err(anyhow::anyhow!("node binary exited with a non-zero status"))
     }
 }
 
