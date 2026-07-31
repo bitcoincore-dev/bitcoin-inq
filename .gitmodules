@@ -1,0 +1,15 @@
+[submodule "coins/bitcoin-scripts"]
+	path = coins/bitcoin-scripts
+	url = https://github.com/coins/bitcoin-scripts.git
+[submodule "mr-zwets/Composite-Arithmetic-Opcodes"]
+	path = mr-zwets/Composite-Arithmetic-Opcodes
+	url = https://github.com/mr-zwets/Composite-Arithmetic-Opcodes.git
+[submodule "bips"]
+	path = bips
+	url = https://github.com/bitcoin/bips.git
+[submodule "inquisition"]
+	path = inquisition
+	url = https://github.com/bitcoin-inquisition/binana.git
+[submodule "wiki"]
+	path = wiki
+	url = https://github.com/bitcoin-inquisition/bitcoin.wiki.git
