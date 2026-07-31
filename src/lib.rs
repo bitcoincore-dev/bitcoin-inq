@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
@@ -11,6 +11,27 @@ pub enum SignalKind {
     Kill,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ChainSelection {
+    Mainnet,
+    Testnet,
+    Testnet4,
+    Signet,
+    Regtest,
+}
+
+impl ChainSelection {
+    pub fn network(self) -> bitcoin::Network {
+        match self {
+            Self::Mainnet => bitcoin::Network::Bitcoin,
+            Self::Testnet => bitcoin::Network::Testnet,
+            Self::Testnet4 => bitcoin::Network::Testnet4,
+            Self::Signet => bitcoin::Network::Signet,
+            Self::Regtest => bitcoin::Network::Regtest,
+        }
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
 pub struct Cli {
@@ -20,10 +41,24 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    /// Start a local Bitcoin Core node.
+    Node(NodeArgs),
     /// Detect the chain the local Bitcoin Core node is running on.
     DetectNetwork(RpcArgs),
     /// Kill a process by PID.
     Kill(ProcessArgs),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum NodeCommands {
+    /// Start bitcoind with a selected chain.
+    Start(NodeStartArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct NodeArgs {
+    #[command(subcommand)]
+    pub command: NodeCommands,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -47,6 +82,29 @@ pub struct RpcArgs {
     /// Optional signet challenge marker to distinguish a custom signet chain.
     #[arg(long)]
     pub signet_challenge: Option<String>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct NodeStartArgs {
+    /// Bitcoin Core chain to start.
+    #[arg(long, value_enum, default_value_t = ChainSelection::Testnet)]
+    pub chain: ChainSelection,
+
+    /// Signet challenge for custom signet networks.
+    #[arg(long)]
+    pub signetchallenge: Option<String>,
+
+    /// Data directory for bitcoind.
+    #[arg(long)]
+    pub datadir: Option<PathBuf>,
+
+    /// Run in the foreground instead of daemonizing.
+    #[arg(long, default_value_t = false)]
+    pub foreground: bool,
+
+    /// Print the command instead of executing it.
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -184,8 +242,85 @@ pub fn kill_process(pid: u32, force: bool) -> Result<()> {
     }
 }
 
+pub fn bitcoind_binary() -> Result<PathBuf> {
+    find_executable(&["bitcoind", "bitcoind.exe", "Bitcoin-Qt"])
+        .ok_or_else(|| anyhow::anyhow!("could not find bitcoind on PATH"))
+}
+
+pub fn bitcoin_cli_binary() -> Result<PathBuf> {
+    find_executable(&["bitcoin-cli", "bitcoin-cli.exe"])
+        .ok_or_else(|| anyhow::anyhow!("could not find bitcoin-cli on PATH"))
+}
+
+fn find_executable(candidates: &[&str]) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    let paths = std::env::split_paths(&path);
+
+    for dir in paths {
+        for candidate in candidates {
+            let full = dir.join(candidate);
+            if is_executable(&full) {
+                return Some(full);
+            }
+        }
+    }
+
+    None
+}
+
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
+}
+
+pub fn start_node(args: NodeStartArgs) -> Result<()> {
+    if args.chain != ChainSelection::Signet && args.signetchallenge.is_some() {
+        return Err(anyhow::anyhow!(
+            "--signetchallenge is only valid with --chain=signet"
+        ));
+    }
+
+    let bitcoind = bitcoind_binary()?;
+    let mut command = Command::new(&bitcoind);
+    command.arg(format!("-chain={}", args.chain.network().to_core_arg()));
+
+    if let Some(datadir) = &args.datadir {
+        command.arg(format!("-datadir={}", datadir.display()));
+    }
+
+    if let Some(challenge) = &args.signetchallenge {
+        command.arg(format!("-signetchallenge={challenge}"));
+    }
+
+    if !args.foreground {
+        command.arg("-daemon");
+    }
+
+    if args.dry_run {
+        println!(
+            "{} {}",
+            bitcoind.display(),
+            command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        return Ok(());
+    }
+
+    let status = command.status().context("failed to invoke bitcoind")?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("bitcoind exited with a non-zero status"))
+    }
+}
+
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Commands::Node(node) => match node.command {
+            NodeCommands::Start(args) => start_node(args),
+        },
         Commands::DetectNetwork(args) => {
             let network = if let Some(rpc_url) = &args.rpc_url {
                 let client = Client::new(rpc_url, rpc_auth(&args)?)
