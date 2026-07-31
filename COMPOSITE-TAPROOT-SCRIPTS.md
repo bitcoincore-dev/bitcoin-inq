@@ -855,3 +855,229 @@ If you are developing smart contract logic, you must restrict yourself to the **
 | **Logical AND** | `OP_IF OP_IF 1 OP_ELSE 0 OP_ENDIF OP_ELSE 0 OP_ENDIF` |
 
 **Recommendation:** If you require complex arithmetic (multiplication, division, or bitwise logic) for your protocol, standard Bitcoin Script is likely not the appropriate tool. You should look into **Taproot-based verification of pre-computed proofs** (where the math is done off-chain and only the result is verified) or explore Layer-2 solutions and sidechains (like Stacks or others) that offer more expressive execution environments.
+
+Here is how you can implement these script building blocks in **Rust** using the canonical `bitcoin` crate (`rust-bitcoin`).
+
+Since standard Bitcoin Script lacks native opcodes for multiplication, division, or logical/bitwise operations, we construct them using `ScriptBuf::builder()` and standard available opcodes (such as `OP_DUP`, `OP_ADD`, `OP_SUB`, `OP_IF`, etc.).
+
+### Prerequisites (`Cargo.toml`)
+
+```toml
+[dependencies]
+bitcoin = "0.32" # Or the latest stable version of rust-bitcoin
+
+```
+
+### Rust Implementation Module
+
+```rust
+use bitcoin::blockdata::opcodes::all::*;
+use bitcoin::script::{Builder, PushBytesBuf};
+use bitcoin::ScriptBuf;
+
+/// Helper to safely push raw byte slices (like masks or constants) into the builder
+fn push_data(builder: Builder, data: &[u8]) -> Builder {
+    let push_bytes = PushBytesBuf::try_from(data).expect("data exceeds push limits");
+    builder.push_slice(&push_bytes)
+}
+
+pub struct ScriptPrimitives;
+
+impl ScriptPrimitives {
+    // ==========================================
+    // 1. ARITHMETIC PRIMITIVES (Multiplication)
+    // ==========================================
+
+    pub fn op_2mul() -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_ADD)
+            .into_script()
+    }
+
+    pub fn op_4mul() -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_ADD)
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_ADD)
+            .into_script()
+    }
+
+    pub fn op_8mul() -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_ADD)
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_ADD)
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_ADD)
+            .into_script()
+    }
+
+    pub fn op_5mul() -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_DUP)
+            .extend_script(&Self::op_4mul())
+            .push_opcode(OP_ADD)
+            .into_script()
+    }
+
+    pub fn op_13mul() -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_TOALTSTACK)
+            .extend_script(&Self::op_8mul())
+            .push_opcode(OP_FROMALTSTACK)
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_TOALTSTACK)
+            .extend_script(&Self::op_4mul())
+            .push_opcode(OP_FROMALTSTACK)
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_TOALTSTACK)
+            .push_opcode(OP_ADD)
+            .push_opcode(OP_ADD)
+            .push_opcode(OP_ADD)
+            .into_script()
+    }
+
+    // ==========================================
+    // 2. DIVISION & MODULO (Hint-Based)
+    // ==========================================
+
+    pub fn op_2div() -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_OVER)
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_ADD)
+            .push_opcode(OP_SUB)
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_0NOTEQUAL)
+            .push_opcode(OP_EQUALVERIFY)
+            .into_script()
+    }
+
+    pub fn op_2mod() -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_SWAP)
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_ADD)
+            .push_opcode(OP_SUB)
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_0NOTEQUAL)
+            .push_opcode(OP_EQUALVERIFY)
+            .into_script()
+    }
+
+    pub fn op_8div() -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_DUP)
+            .extend_script(&Self::op_8mul())
+            // Assumes constant is handled or provided; placeholder layout:
+            .push_opcode(OP_SWAP)
+            .push_opcode(OP_SUB)
+            .push_int(0)
+            .push_int(8)
+            .push_opcode(OP_WITHIN)
+            .push_opcode(OP_VERIFY)
+            .into_script()
+    }
+
+    // ==========================================
+    // 3. BOOLEAN & LOGICAL OPERATORS
+    // ==========================================
+
+    /// Ensures input is strictly canonical 1 or 0 (prevents malleability)
+    pub fn non_malleable_bool() -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_SIZE)
+            .push_opcode(OP_EQUALVERIFY)
+            .into_script()
+    }
+
+    // ==========================================
+    // 4. BITWISE OPERATIONS
+    // ==========================================
+
+    pub fn op_lshift() -> ScriptBuf {
+        let mut builder = Builder::new()
+            .push_opcode(OP_ABS)
+            .push_opcode(OP_DUP);
+
+        // Push 0xffffff3f mask safely
+        builder = push_data(builder, &[0x3f, 0xff, 0xff, 0xff]);
+
+        builder
+            .push_opcode(OP_GREATERTHAN)
+            .push_opcode(OP_IF)
+            .push_int(0x40) // Simplified push for positive boundary value
+            .push_opcode(OP_SUB)
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_ADD)
+            .push_opcode(OP_NEGATE)
+            .push_opcode(OP_ELSE)
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_ADD)
+            .push_opcode(OP_ENDIF)
+            .into_script()
+    }
+
+    // ==========================================
+    // 5. SIGNATURE & FLOW CONTROL
+    // ==========================================
+
+    pub fn op_if_sig_size() -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_DUP)
+            .push_opcode(OP_TOALTSTACK)
+            .push_opcode(OP_CHECKSIGVERIFY)
+            .push_opcode(OP_FROMALTSTACK)
+            .push_opcode(OP_SIZE)
+            .push_opcode(OP_TOALTSTACK)
+            .push_opcode(OP_DROP)
+            // Conditional branches for sizes would follow here...
+            .into_script()
+    }
+
+    // ==========================================
+    // 6. STACK & ARRAY MANIPULATION
+    // ==========================================
+
+    pub fn op_2sort() -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_2DUP)
+            .push_opcode(OP_MAX)
+            .push_opcode(OP_TOALTSTACK)
+            .push_opcode(OP_MIN)
+            .push_opcode(OP_FROMALTSTACK)
+            .into_script()
+    }
+
+    pub fn op_abs() -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_DUP)
+            .push_int(0)
+            .push_opcode(OP_LESSTHAN)
+            .push_opcode(OP_IF)
+            .push_opcode(OP_NEGATE)
+            .push_opcode(OP_ENDIF)
+            .into_script()
+    }
+
+    // ==========================================
+    // 7. TIME & VERIFICATION
+    // ==========================================
+
+    pub fn min_block_height(height: i64) -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_DUP)
+            .push_int(height)
+            .push_opcode(OP_LESSTHAN)
+            .push_opcode(OP_CHECKLOCKTIMEVERIFY)
+            .into_script()
+    }
+}
+
+```
