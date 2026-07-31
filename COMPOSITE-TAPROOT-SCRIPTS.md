@@ -1159,3 +1159,50 @@ pub fn construct_rotate_and_sign_leaf(expected_result: i64, public_key_bytes: &[
 }
 
 ```
+
+```rust
+use bitcoin::blockdata::opcodes::all::*;
+use bitcoin::script::Builder;
+use bitcoin::ScriptBuf;
+
+/// Re-implements the full 24-bit Left Rotate snippet in Rust.
+///
+/// Stack layout expectation before execution:
+/// [Hint] (bottom of stack)
+/// [Quotient] (top of stack / most recent push)
+pub fn construct_left_rotate_snippet(expected_result: i64) -> ScriptBuf {
+    Builder::new()
+        // OP_DUP OP_TOALTSTACK -> Duplicate and store the Hint on the AltStack
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_TOALTSTACK)
+
+        // OP_DUP OP_DUP OP_ADD OP_DUP OP_ADD OP_DUP OP_ADD -> Shift Left by 3 (Multiply by 8)
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_ADD)
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_ADD)
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_ADD)
+
+        // OP_TOALTSTACK -> Store the shifted part temporarily
+        .push_opcode(OP_TOALTSTACK)
+
+        // --- (Verify Quotient for Shift >> 21 using hint-based range check) ---
+        .push_opcode(OP_DUP)
+        .push_int(0)
+        .push_int(2097152) // 2^21 upper bound
+        .push_opcode(OP_WITHIN)
+        .push_opcode(OP_VERIFY)
+
+        // OP_FROMALTSTACK OP_ADD -> Retrieve shifted part and add it to the division result (Combined Result)
+        .push_opcode(OP_FROMALTSTACK)
+        .push_opcode(OP_ADD)
+
+        // <Expected_Result> OP_EQUALVERIFY -> Enforce the bitwise constraint matches expectation
+        .push_int(expected_result)
+        .push_opcode(OP_EQUALVERIFY)
+        .into_script()
+}
+
+```
