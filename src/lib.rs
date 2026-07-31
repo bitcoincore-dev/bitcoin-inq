@@ -561,4 +561,13 @@ mod tests {
         assert_eq!(normalize_tag("v29.4-inq"), "29.4-inq");
         assert_eq!(normalize_tag("29.4-inq"), "29.4-inq");
     }
+
+    #[test]
+    fn prints_available_releases() {
+        let releases = fetch_release_list().expect("release list");
+        for release in &releases {
+            println!("{}", release.tag_name);
+        }
+        assert!(!releases.is_empty());
+    }
 }
