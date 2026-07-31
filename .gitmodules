@@ -10,3 +10,6 @@
 [submodule "inquisition"]
 	path = inquisition
 	url = https://github.com/bitcoin-inquisition/binana.git
+[submodule "wiki"]
+	path = wiki
+	url = https://github.com/bitcoin-inquisition/bitcoin.wiki.git
