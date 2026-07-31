@@ -444,3 +444,94 @@ By forcing the user to provide an input that satisfies `OP_8DIV` (for example), 
 If you want to make these scripts truly "covenant-like," use `OP_SIGCOMMITMENT` (as mentioned in your primitives) to force the transaction to pre-commit to a specific hash. This prevents the user from changing the output destination, effectively pinning the funds to a specific transaction structure.
 
 **Do you want to see how to structure the `Witness` stack to pass both the hint and the signature simultaneously for one of these leaves?**
+
+To execute a leaf in a Taproot (P2TR) script that requires both an **arithmetic hint** and a **cryptographic signature**, you must understand that the Bitcoin Virtual Machine processes the "Witness Stack" in a specific order.
+
+In a Tapscript leaf, the witness data is popped from the stack from right to left (or top to bottom, depending on your view). To make your `Leaf C` (Policy-Enforced Spend) work, your witness needs to be structured so that the `OP_CHECKSIG` consumes the signature, while your arithmetic primitives consume the hint.
+
+---
+
+### The Witness Stack Construction
+
+For `Leaf C`, your witness stack should be organized like this:
+
+| Stack Position | Data Item | Description |
+| --- | --- | --- |
+| **Top (First popped)** | `<Signature>` | The Schnorr signature (e.g., 64 bytes). |
+| **Bottom (Last popped)** | `<Hint>` | The integer required for the `OP_8DIV` constraint. |
+
+#### Why this order?
+
+1. **Arithmetic First:** Your script starts with the arithmetic operations (`OP_DUP`, `OP_8MUL`, etc.). These operations will consume the `<Hint>` at the bottom of your stack.
+2. **Signature Last:** After the arithmetic constraints pass (using `OP_VERIFY`), the `<Signature>` is at the top of the stack, ready for `OP_CHECKSIG`.
+
+---
+
+### The Unlocking Script (Witness) Example
+
+If you are using `btcdeb` or a similar tool to test this, your command-line input for the witness stack would look like this:
+
+```bash
+# Assuming the script uses <Hint> then <Signature>
+# Witness: [Hint] [Signature]
+btcdeb "leaf_c_script.hex" 0x3d0d 0x<SchnorrSig>
+
+```
+
+#### Breakdown of the execution flow:
+
+1. **Arithmetic Phase:**
+* The script encounters `<Hint>`.
+* It performs `OP_DUP` and the multiplication chain.
+* It performs `OP_SUB` against the constant.
+* It performs `OP_WITHIN` and `OP_VERIFY`.
+* *If the math is wrong, the script terminates here (Invalid).*
+
+
+2. **Cryptographic Phase:**
+* The `<Hint>` has been consumed or dropped by the previous operations.
+* The `<Signature>` is now at the top of the stack.
+* `OP_CHECKSIG` is called.
+* The script validates the signature against the `PublicKey` embedded in the leaf.
+
+
+
+---
+
+### Pro-Tip: Keeping the Stack Clean
+
+Because you are using `OP_TOALTSTACK` and `OP_FROMALTSTACK` in your composite opcodes, you **must ensure the stack is perfectly clean** before hitting `OP_CHECKSIG`.
+
+If your arithmetic primitive leaves a "residual" value on the stack (like a remainder or an extra copy of the hint), `OP_CHECKSIG` will fail because it expects *only* the signature to be present for the public key.
+
+**Revised Leaf Structure for safety:**
+
+```bitcoin
+# 1. Arithmetic Phase
+<Hint> OP_DUP OP_TOALTSTACK ... (do math) ...
+OP_FROMALTSTACK OP_DROP  # Ensure AltStack is cleaned
+OP_VERIFY                # Ensure math result was correct
+
+# 2. Signature Phase
+<PublicKey> OP_CHECKSIG
+
+```
+
+### Visualizing the Data Flow
+
+* **Witness:** `[Hint, Signature]`
+* **Opcode 1 (`OP_DUP`):** Copies the Hint.
+* **Operations:** Logic runs on the Hint.
+* **`OP_VERIFY`:** Pops the result of your arithmetic check.
+* **Remaining:** Only the `Signature` remains on the stack.
+* **`OP_CHECKSIG`:** Pops the `Signature` and the `PublicKey` (from the script), returning `True` if valid.
+
+---
+
+### Summary Checklist for your Covenant-Lite
+
+1. **Minimal Encoding:** Ensure the `<Hint>` in your witness is the minimal representation (e.g., `0x01` instead of `0x0100`).
+2. **AltStack Hygiene:** Always `OP_FROMALTSTACK` and `OP_DROP` at the end of your arithmetic primitives to prevent stack pollution.
+3. **Witness Order:** Always verify if your script pops the arithmetic items *before* the signature. If your script design changes, your witness order must change to match.
+
+Would you like to try writing a full witness stack for the **Bitwise Rotate** example to see how the stack would look after that specific operation?
