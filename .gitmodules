@@ -4,3 +4,6 @@
 [submodule "mr-zwets/Composite-Arithmetic-Opcodes"]
 	path = mr-zwets/Composite-Arithmetic-Opcodes
 	url = https://github.com/mr-zwets/Composite-Arithmetic-Opcodes.git
+[submodule "bips"]
+	path = bips
+	url = https://github.com/bitcoin/bips.git
