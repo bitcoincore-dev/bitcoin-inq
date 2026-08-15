@@ -144,6 +144,22 @@ jobs:
           # Actually do builds and make zips and whatnot
           dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
           echo "dist ran successfully"
+      - name: Import Signing Certificate
+        if: ${{ runner.os == 'macOS' }}
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
+          p12-password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+      - name: Sign & Notarize Binary
+        if: ${{ runner.os == 'macOS' }}
+        uses: lando/code-sign-action@v3
+        with:
+          file: build/my-app
+          certificate-data: ${{ secrets.MACOS_CERTIFICATE }}
+          certificate-password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          apple-notary-user: ${{ secrets.APPLE_ID }}
+          apple-notary-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
       - id: cargo-dist
         name: Post-build
         # We force bash here just because github makes it really hard to get values up
