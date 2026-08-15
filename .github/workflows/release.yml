@@ -144,11 +144,25 @@ jobs:
           # Actually do builds and make zips and whatnot
           dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
           echo "dist ran successfully"
+      - id: sign-binary-path
+        name: Resolve signing binary path
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          if [ -f "target/${{ join(matrix.targets, '-') }}/release/bitcoin-inq" ]; then
+            echo "path=$(pwd)/target/${{ join(matrix.targets, '-') }}/release/bitcoin-inq" >> "$GITHUB_OUTPUT"
+          elif [ -f "target/release/bitcoin-inq" ]; then
+            echo "path=$(pwd)/target/release/bitcoin-inq" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error title=Signed binary not found::Expected a bitcoin-inq binary in target/${{ join(matrix.targets, '-') }}/release or target/release"
+            find target -maxdepth 3 -type f -name bitcoin-inq -print
+            exit 1
+          fi
       - name: Sign & Notarize Binary
         if: ${{ runner.os == 'macOS' }}
         uses: lando/code-sign-action@v3
         with:
-          file: target/${{ join(matrix.targets, '-') }}/release/bitcoin-inq
+          file: ${{ steps.sign-binary-path.outputs.path }}
           certificate-data: ${{ secrets.MACOS_DEV_CERTIFICATE }}
           certificate-password: ${{ secrets.MACOS_DEV_CERTIFICATE_PWD }}
           apple-notary-user: ${{ secrets.APPLE_ID }}
