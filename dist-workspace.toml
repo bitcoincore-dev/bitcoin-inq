@@ -20,3 +20,4 @@ publish-jobs = ["homebrew"]
 # Whether to install an updater program
 install-updater = false
 allow-dirty = ["ci"]
+github-build-setup = "../build-setup.yml"
