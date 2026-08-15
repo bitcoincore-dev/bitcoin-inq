@@ -166,6 +166,7 @@ jobs:
         with:
           file: ${{ steps.sign-binary-path.outputs.path }}
           certificate-data: ${{ secrets.MACOS_DEV_CERTIFICATE }}
+          certificate-id: M684FYCYG6
           certificate-password: ${{ secrets.MACOS_DEV_CERTIFICATE_PWD }}
           apple-notary-user: ${{ secrets.APPLE_ID }}
           apple-notary-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
