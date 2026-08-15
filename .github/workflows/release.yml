@@ -149,8 +149,8 @@ jobs:
         uses: lando/code-sign-action@v3
         with:
           file: target/${{ join(matrix.targets, '-') }}/release/bitcoin-inq
-          certificate-data: ${{ secrets.MACOS_CERTIFICATE }}
-          certificate-password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          certificate-data: ${{ secrets.MACOS_DEV_CERTIFICATE }}
+          certificate-password: ${{ secrets.MACOS_DEV_CERTIFICATE_PWD }}
           apple-notary-user: ${{ secrets.APPLE_ID }}
           apple-notary-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
