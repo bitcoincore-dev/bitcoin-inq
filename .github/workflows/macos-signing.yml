@@ -33,11 +33,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.raw-artifact-name }}
+          path: artifacts
       - name: Locate signing inputs
         id: locate
         shell: bash
         run: |
-          root="${{ steps.download.outputs.download-path }}"
+          root="artifacts"
           bin="$(find "$root" -type f -path '*/dist/bitcoin-inq' -print -quit)"
           distrib="$(find "$root" -type d -name distrib -print -quit)"
           if [ -z "$bin" ] || [ -z "$distrib" ]; then
