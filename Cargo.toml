@@ -1,6 +1,6 @@
 [package]
 name = "bitcoin-inq"
-version = "0.0.29"
+version = "0.0.30"
 edition = "2024"
 description = "A small CLI for Bitcoin Core and Bitcoin Inquisition workflows"
 authors = ["randymcmillan <randymcmillan@protonmail.com>"]
