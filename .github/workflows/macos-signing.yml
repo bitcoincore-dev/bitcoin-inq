@@ -48,6 +48,9 @@ jobs:
             echo "::error title=Downloaded artifact layout unexpected::Unable to locate signing inputs under $root"
             exit 1
           fi
+          ls -la "$bin"
+          ls -la "$distrib"
+          stat "$bin"
           echo "bin=$bin" >> "$GITHUB_OUTPUT"
           echo "distrib=$distrib" >> "$GITHUB_OUTPUT"
       - name: Sign & Notarize Binary
