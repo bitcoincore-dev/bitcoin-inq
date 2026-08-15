@@ -144,33 +144,6 @@ jobs:
           # Actually do builds and make zips and whatnot
           dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
           echo "dist ran successfully"
-      - id: sign-binary-path
-        name: Resolve signing binary path
-        if: ${{ runner.os == 'macOS' }}
-        shell: bash
-        run: |
-          if [ -f "target/${{ join(matrix.targets, '-') }}/dist/bitcoin-inq" ]; then
-            echo "path=$(pwd)/target/${{ join(matrix.targets, '-') }}/dist/bitcoin-inq" >> "$GITHUB_OUTPUT"
-          elif [ -f "target/${{ join(matrix.targets, '-') }}/release/bitcoin-inq" ]; then
-            echo "path=$(pwd)/target/${{ join(matrix.targets, '-') }}/release/bitcoin-inq" >> "$GITHUB_OUTPUT"
-          elif [ -f "target/release/bitcoin-inq" ]; then
-            echo "path=$(pwd)/target/release/bitcoin-inq" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error title=Signed binary not found::Expected a bitcoin-inq binary in target/${{ join(matrix.targets, '-') }}/dist, target/${{ join(matrix.targets, '-') }}/release, or target/release"
-            find target -maxdepth 3 -type f -name bitcoin-inq -print
-            exit 1
-          fi
-      - name: Sign & Notarize Binary
-        if: ${{ runner.os == 'macOS' }}
-        uses: lando/code-sign-action@v3
-        with:
-          file: ${{ steps.sign-binary-path.outputs.path }}
-          certificate-data: ${{ secrets.MACOS_DEV_CERTIFICATE }}
-          certificate-id: M684FYCYG6
-          certificate-password: ${{ secrets.MACOS_DEV_CERTIFICATE_PWD }}
-          apple-notary-user: ${{ secrets.APPLE_ID }}
-          apple-notary-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
       - id: cargo-dist
         name: Post-build
         # We force bash here just because github makes it really hard to get values up
@@ -185,18 +158,44 @@ jobs:
 
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
       - name: "Upload artifacts"
+        if: ${{ runner.os != 'macOS' }}
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-build-local-${{ join(matrix.targets, '_') }}
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
+      - name: "Upload raw artifacts"
+        if: ${{ runner.os == 'macOS' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-artifacts-build-local-${{ join(matrix.targets, '_') }}
+          path: |
+            ${{ steps.cargo-dist.outputs.paths }}
+            ${{ env.BUILD_MANIFEST_NAME }}
+
+  macos-signing:
+    name: macos-signing (${{ join(matrix.targets, ', ') }})
+    needs:
+      - plan
+      - build-local-artifacts
+    if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') && contains(join(matrix.targets, '-'), 'apple-darwin') }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix }}
+    uses: ./.github/workflows/macos-signing.yml
+    with:
+      raw-artifact-name: raw-artifacts-build-local-${{ join(matrix.targets, '_') }}
+      final-artifact-name: artifacts-build-local-${{ join(matrix.targets, '_') }}
+      binary-path: target/${{ join(matrix.targets, '-') }}/dist/bitcoin-inq
+    secrets: inherit
 
   # Build and package all the platform-agnostic(ish) things
   build-global-artifacts:
     needs:
       - plan
       - build-local-artifacts
+      - macos-signing
     runs-on: "ubuntu-22.04"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

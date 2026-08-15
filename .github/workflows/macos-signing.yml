@@ -1,0 +1,52 @@
+name: macos-signing
+
+on:
+  workflow_call:
+    inputs:
+      raw-artifact-name:
+        required: true
+        type: string
+      final-artifact-name:
+        required: true
+        type: string
+      binary-path:
+        required: true
+        type: string
+    secrets:
+      MACOS_DEV_CERTIFICATE:
+        required: true
+      MACOS_DEV_CERTIFICATE_PWD:
+        required: true
+      APPLE_ID:
+        required: true
+      APPLE_APP_SPECIFIC_PASSWORD:
+        required: true
+      APPLE_TEAM_ID:
+        required: true
+
+jobs:
+  sign:
+    runs-on: macos-14
+    steps:
+      - name: Download raw artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.raw-artifact-name }}
+          path: .
+      - name: Sign & Notarize Binary
+        uses: lando/code-sign-action@v3
+        with:
+          file: ${{ inputs.binary-path }}
+          certificate-data: ${{ secrets.MACOS_DEV_CERTIFICATE }}
+          certificate-id: M684FYCYG6
+          certificate-password: ${{ secrets.MACOS_DEV_CERTIFICATE_PWD }}
+          apple-notary-user: ${{ secrets.APPLE_ID }}
+          apple-notary-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.final-artifact-name }}
+          path: |
+            target/distrib/
+            ${{ inputs.binary-path }}
