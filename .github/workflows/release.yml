@@ -191,7 +191,7 @@ jobs:
     with:
       raw-artifact-name: raw-artifacts-build-local-${{ matrix.target }}
       final-artifact-name: artifacts-build-local-${{ matrix.target }}
-      binary-path: target/${{ matrix.target }}/dist/bitcoin-inq
+      target-triple: ${{ matrix.target }}
     secrets: inherit
 
   # Build and package all the platform-agnostic(ish) things
