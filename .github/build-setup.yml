@@ -4,8 +4,8 @@
 # 3. Run `codesign` and `xcrun notarytool` during the workflow run.
 #
 # Required secrets:
-# - MACOS_CERTIFICATE: Base64-encoded .p12 certificate
-# - MACOS_CERTIFICATE_PWD: Password used when exporting the .p12 file
+# - MACOS_DEV_CERTIFICATE: Base64-encoded .p12 certificate
+# - MACOS_DEV_CERTIFICATE_PWD: Password used when exporting the .p12 file
 # - APPLE_ID: Apple Developer account email address
 # - APPLE_TEAM_ID: 10-character Apple Developer Team ID
 # - APPLE_APP_SPECIFIC_PASSWORD: App-specific password from appleid.apple.com
@@ -16,5 +16,5 @@
   if: ${{ runner.os == 'macOS' }}
   uses: apple-actions/import-codesign-certs@v3
   with:
-    p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
-    p12-password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+    p12-file-base64: ${{ secrets.MACOS_DEV_CERTIFICATE }}
+    p12-password: ${{ secrets.MACOS_DEV_CERTIFICATE_PWD }}
