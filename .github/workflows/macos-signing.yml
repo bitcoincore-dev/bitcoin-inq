@@ -36,7 +36,7 @@ jobs:
       - name: Sign & Notarize Binary
         uses: lando/code-sign-action@v3
         with:
-          file: ./${{ inputs.raw-artifact-name }}/${{ inputs.target-triple }}/dist/bitcoin-inq
+          file: ./${{ inputs.target-triple }}/dist/bitcoin-inq
           certificate-data: ${{ secrets.MACOS_DEV_CERTIFICATE }}
           certificate-id: M684FYCYG6
           certificate-password: ${{ secrets.MACOS_DEV_CERTIFICATE_PWD }}
@@ -48,5 +48,5 @@ jobs:
         with:
           name: ${{ inputs.final-artifact-name }}
           path: |
-            ./${{ inputs.raw-artifact-name }}/distrib/
-            ./${{ inputs.raw-artifact-name }}/${{ inputs.target-triple }}/dist/bitcoin-inq
+            ./distrib/
+            ./${{ inputs.target-triple }}/dist/bitcoin-inq
