@@ -33,6 +33,14 @@ jobs:
         with:
           name: ${{ inputs.raw-artifact-name }}
           path: .
+      - name: Stage signing binary
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "${{ inputs.binary-path }}")" target/distrib
+          cp "./${{ inputs.raw-artifact-name }}/${{ inputs.binary-path }}" "${{ inputs.binary-path }}"
+          if [ -d "./${{ inputs.raw-artifact-name }}/target/distrib" ]; then
+            cp -R "./${{ inputs.raw-artifact-name }}/target/distrib/." target/distrib/
+          fi
       - name: Sign & Notarize Binary
         uses: lando/code-sign-action@v3
         with:
