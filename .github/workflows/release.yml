@@ -186,13 +186,11 @@ jobs:
       matrix:
         include:
           - target: aarch64-apple-darwin
-            artifact: aarch64_apple_darwin
           - target: x86_64-apple-darwin
-            artifact: x86_64_apple_darwin
     uses: ./.github/workflows/macos-signing.yml
     with:
-      raw-artifact-name: raw-artifacts-build-local-${{ matrix.artifact }}
-      final-artifact-name: artifacts-build-local-${{ matrix.artifact }}
+      raw-artifact-name: raw-artifacts-build-local-${{ matrix.target }}
+      final-artifact-name: artifacts-build-local-${{ matrix.target }}
       binary-path: target/${{ matrix.target }}/dist/bitcoin-inq
     secrets: inherit
 
