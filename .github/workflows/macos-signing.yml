@@ -72,7 +72,7 @@ jobs:
           codesign --force --options runtime --timestamp -s 'Developer ID Application: Randy McMillan (M684FYCYG6)' "$bin"
           codesign -v "$bin" --verbose
 
-          xcrun notarytool submit "$bin" --wait \
+          xcrun notarytool submit "$bin" --force --wait \
             --apple-id '${{ secrets.APPLE_ID }}' \
             --password '${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}' \
             --team-id '${{ secrets.APPLE_TEAM_ID }}'
