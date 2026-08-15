@@ -176,19 +176,24 @@ jobs:
             ${{ env.BUILD_MANIFEST_NAME }}
 
   macos-signing:
-    name: macos-signing (${{ join(matrix.targets, ', ') }})
+    name: macos-signing (${{ matrix.target }})
     needs:
       - plan
       - build-local-artifacts
-    if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') && contains(join(matrix.targets, '-'), 'apple-darwin') }}
+    if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix }}
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            artifact: aarch64_apple_darwin
+          - target: x86_64-apple-darwin
+            artifact: x86_64_apple_darwin
     uses: ./.github/workflows/macos-signing.yml
     with:
-      raw-artifact-name: raw-artifacts-build-local-${{ join(matrix.targets, '_') }}
-      final-artifact-name: artifacts-build-local-${{ join(matrix.targets, '_') }}
-      binary-path: target/${{ join(matrix.targets, '-') }}/dist/bitcoin-inq
+      raw-artifact-name: raw-artifacts-build-local-${{ matrix.artifact }}
+      final-artifact-name: artifacts-build-local-${{ matrix.artifact }}
+      binary-path: target/${{ matrix.target }}/dist/bitcoin-inq
     secrets: inherit
 
   # Build and package all the platform-agnostic(ish) things
