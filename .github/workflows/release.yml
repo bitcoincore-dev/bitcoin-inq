@@ -149,12 +149,14 @@ jobs:
         if: ${{ runner.os == 'macOS' }}
         shell: bash
         run: |
-          if [ -f "target/${{ join(matrix.targets, '-') }}/release/bitcoin-inq" ]; then
+          if [ -f "target/${{ join(matrix.targets, '-') }}/dist/bitcoin-inq" ]; then
+            echo "path=$(pwd)/target/${{ join(matrix.targets, '-') }}/dist/bitcoin-inq" >> "$GITHUB_OUTPUT"
+          elif [ -f "target/${{ join(matrix.targets, '-') }}/release/bitcoin-inq" ]; then
             echo "path=$(pwd)/target/${{ join(matrix.targets, '-') }}/release/bitcoin-inq" >> "$GITHUB_OUTPUT"
           elif [ -f "target/release/bitcoin-inq" ]; then
             echo "path=$(pwd)/target/release/bitcoin-inq" >> "$GITHUB_OUTPUT"
           else
-            echo "::error title=Signed binary not found::Expected a bitcoin-inq binary in target/${{ join(matrix.targets, '-') }}/release or target/release"
+            echo "::error title=Signed binary not found::Expected a bitcoin-inq binary in target/${{ join(matrix.targets, '-') }}/dist, target/${{ join(matrix.targets, '-') }}/release, or target/release"
             find target -maxdepth 3 -type f -name bitcoin-inq -print
             exit 1
           fi
