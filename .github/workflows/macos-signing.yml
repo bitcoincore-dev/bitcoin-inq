@@ -74,8 +74,7 @@ jobs:
 
           xcrun notarytool submit "$bin" --force --wait \
             --apple-id '${{ secrets.APPLE_ID }}' \
-            --password '${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}' \
-            --team-id '${{ secrets.APPLE_TEAM_ID }}'
+            --password '${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}'
 
           xcrun stapler staple "$bin"
       - name: Upload signed artifacts
