@@ -33,10 +33,24 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.raw-artifact-name }}
+      - name: Locate signing inputs
+        id: locate
+        shell: bash
+        run: |
+          root="${{ steps.download.outputs.download-path }}"
+          bin="$(find "$root" -type f -path '*/dist/bitcoin-inq' -print -quit)"
+          distrib="$(find "$root" -type d -name distrib -print -quit)"
+          if [ -z "$bin" ] || [ -z "$distrib" ]; then
+            echo "::error title=Downloaded artifact layout unexpected::Unable to locate signing inputs under $root"
+            find "$root" -maxdepth 6 -print | sort
+            exit 1
+          fi
+          echo "bin=$bin" >> "$GITHUB_OUTPUT"
+          echo "distrib=$distrib" >> "$GITHUB_OUTPUT"
       - name: Sign & Notarize Binary
         uses: lando/code-sign-action@v3
         with:
-          file: ${{ steps.download.outputs.download-path }}/target/${{ inputs.target-triple }}/dist/bitcoin-inq
+          file: ${{ steps.locate.outputs.bin }}
           certificate-data: ${{ secrets.MACOS_DEV_CERTIFICATE }}
           certificate-id: M684FYCYG6
           certificate-password: ${{ secrets.MACOS_DEV_CERTIFICATE_PWD }}
@@ -48,5 +62,5 @@ jobs:
         with:
           name: ${{ inputs.final-artifact-name }}
           path: |
-            ${{ steps.download.outputs.download-path }}/target/distrib/
-            ${{ steps.download.outputs.download-path }}/target/${{ inputs.target-triple }}/dist/bitcoin-inq
+            ${{ steps.locate.outputs.distrib }}/
+            ${{ steps.locate.outputs.bin }}
