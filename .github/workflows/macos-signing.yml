@@ -39,11 +39,13 @@ jobs:
         shell: bash
         run: |
           root="artifacts"
+          pwd
+          ls -la "$root" || true
+          find "$root" -maxdepth 8 -print | sort || true
           bin="$(find "$root" -type f -path '*/dist/bitcoin-inq' -print -quit)"
           distrib="$(find "$root" -type d -name distrib -print -quit)"
           if [ -z "$bin" ] || [ -z "$distrib" ]; then
             echo "::error title=Downloaded artifact layout unexpected::Unable to locate signing inputs under $root"
-            find "$root" -maxdepth 6 -print | sort
             exit 1
           fi
           echo "bin=$bin" >> "$GITHUB_OUTPUT"
