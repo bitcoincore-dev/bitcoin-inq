@@ -33,10 +33,28 @@ jobs:
         with:
           name: ${{ inputs.raw-artifact-name }}
           path: .
+      - name: Stage signing files
+        shell: bash
+        run: |
+          bin="$(find . -type f -name bitcoin-inq -print -quit)"
+          if [ -z "$bin" ]; then
+            echo "::error title=Signed binary not found::Unable to locate bitcoin-inq after downloading ${{ inputs.raw-artifact-name }}"
+            find . -maxdepth 5 -print
+            exit 1
+          fi
+          distrib="$(find . -type d -name distrib -print -quit)"
+          if [ -z "$distrib" ]; then
+            echo "::error title=Distributable files not found::Unable to locate distrib after downloading ${{ inputs.raw-artifact-name }}"
+            find . -maxdepth 5 -print
+            exit 1
+          fi
+          mkdir -p "target/${{ inputs.target-triple }}/dist" target/distrib
+          cp "$bin" "target/${{ inputs.target-triple }}/dist/bitcoin-inq"
+          cp -R "$distrib/." target/distrib/
       - name: Sign & Notarize Binary
         uses: lando/code-sign-action@v3
         with:
-          file: ./${{ inputs.raw-artifact-name }}/${{ inputs.target-triple }}/dist/bitcoin-inq
+          file: target/${{ inputs.target-triple }}/dist/bitcoin-inq
           certificate-data: ${{ secrets.MACOS_DEV_CERTIFICATE }}
           certificate-id: M684FYCYG6
           certificate-password: ${{ secrets.MACOS_DEV_CERTIFICATE_PWD }}
@@ -48,5 +66,5 @@ jobs:
         with:
           name: ${{ inputs.final-artifact-name }}
           path: |
-            ./${{ inputs.raw-artifact-name }}/distrib/
-            ./${{ inputs.raw-artifact-name }}/${{ inputs.target-triple }}/dist/bitcoin-inq
+            target/distrib/
+            target/${{ inputs.target-triple }}/dist/bitcoin-inq
