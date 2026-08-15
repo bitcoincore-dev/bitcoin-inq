@@ -36,10 +36,17 @@ jobs:
       - name: Stage signing binary
         shell: bash
         run: |
+          src="$(find "./${{ inputs.raw-artifact-name }}" -type f -name bitcoin-inq -print -quit)"
+          if [ -z "$src" ]; then
+            echo "::error title=Signed binary not found::Unable to locate bitcoin-inq inside ./${{ inputs.raw-artifact-name }}"
+            find "./${{ inputs.raw-artifact-name }}" -maxdepth 4 -print
+            exit 1
+          fi
           mkdir -p "$(dirname "${{ inputs.binary-path }}")" target/distrib
-          cp "./${{ inputs.raw-artifact-name }}/${{ inputs.binary-path }}" "${{ inputs.binary-path }}"
-          if [ -d "./${{ inputs.raw-artifact-name }}/target/distrib" ]; then
-            cp -R "./${{ inputs.raw-artifact-name }}/target/distrib/." target/distrib/
+          cp "$src" "${{ inputs.binary-path }}"
+          distrib_dir="$(find "./${{ inputs.raw-artifact-name }}" -type d -path '*/target/distrib' -print -quit)"
+          if [ -n "$distrib_dir" ]; then
+            cp -R "$distrib_dir/." target/distrib/
           fi
       - name: Sign & Notarize Binary
         uses: lando/code-sign-action@v3
