@@ -103,6 +103,12 @@ jobs:
             exit 1
           fi
 
+          release_dir="$(find "${{ steps.locate.outputs.distrib }}" -maxdepth 1 -type d -name "bitcoin-inq-${target_triple}" -print -quit)"
+          if [ -z "$release_dir" ]; then
+            echo "::error title=Unable to locate packaged macOS release directory::Could not find bitcoin-inq-${target_triple} in the release tree"
+            exit 1
+          fi
+
           workdir="$(mktemp -d)"
           tar -xJf "$tarball" -C "$workdir"
           archive_root="$(find "$workdir" -mindepth 1 -maxdepth 1 -type d -print -quit)"
@@ -114,7 +120,9 @@ jobs:
           fi
 
           cp -p "$bin" "$packaged_bin"
+          cp -p "$bin" "$release_dir/bitcoin-inq"
           codesign -v "$packaged_bin" --verbose
+          codesign -v "$release_dir/bitcoin-inq" --verbose
 
           tar -cJf "$tarball" -C "$workdir" "$(basename "$archive_root")"
           (
