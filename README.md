@@ -20,6 +20,19 @@
 - `inquisition --install` accepts a release tag like `v29.4-inq` or `29.4-inq`. Omit the value to print the available releases.
 - `inquisition --path` installs `bitcoin-qt-inq`, `bitcoind-inq`, and `bitcoin-cli-inq` into the first writable directory on `PATH`.
 
+## Release flow
+
+This repo uses `cargo-dist` for tagged releases (`v*.*.*`):
+
+1. `plan` runs `dist host --steps=create` to compute the release manifest and matrix.
+2. `build-local-artifacts` builds per-platform archives and updater assets.
+3. `macos-signing` signs and notarizes the macOS binary, then repacks the macOS `.tar.xz` so the packaged binary stays signed too.
+4. `build-global-artifacts` finishes the cross-platform assets and checksums.
+5. `host` runs `dist host --steps=upload --steps=release` and publishes the GitHub Release.
+6. `publish-homebrew-formula` updates the tap when the release is eligible.
+
+Published release assets are the packaged archives, checksums, update bundles, and installer scripts. The release job edits and re-uploads on reruns, so it is safe to retry a failed release tag without manually deleting the release first.
+
 ## Examples
 
 ```bash
