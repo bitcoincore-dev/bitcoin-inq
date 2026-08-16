@@ -305,7 +305,7 @@ jobs:
         run: |
           # Write and read notes from a file to avoid quoting breaking things
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
-          mapfile -t release_assets < <(find artifacts/distrib -type f ! -name '*-dist-manifest.json' | sort)
+          mapfile -t release_assets < <(find artifacts/distrib -maxdepth 1 -type f ! -name '*-dist-manifest.json' | sort)
 
           if gh release view "${{ needs.plan.outputs.tag }}" >/dev/null 2>&1; then
             gh release edit "${{ needs.plan.outputs.tag }}" \
