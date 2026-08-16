@@ -10,6 +10,8 @@
 # - APPLE_TEAM_ID: 10-character Apple Developer Team ID (used as a fallback if
 #   the imported certificate does not expose its team ID)
 # - APPLE_APP_SPECIFIC_PASSWORD: App-specific password from appleid.apple.com
+# - HOMEBREW_TAP_TOKEN: Required by the release workflow to push the tap update
+#   after publishing a release
 #
 # This hook only imports the certificate for cargo-dist builds; the workflow
 # step that signs the binary should invoke the actual signing/notarization tools.

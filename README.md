@@ -33,6 +33,18 @@ This repo uses `cargo-dist` for tagged releases (`v*.*.*`):
 
 Published release assets are the packaged archives, checksums, update bundles, and installer scripts. The release job edits and re-uploads on reruns, so it is safe to retry a failed release tag without manually deleting the release first.
 
+### GitHub Actions requirements
+
+- Repository Actions permissions: `contents: write`
+- `MACOS_DEV_CERTIFICATE`: Base64-encoded Developer ID `.p12`
+- `MACOS_DEV_CERTIFICATE_PWD`: `.p12` password
+- `APPLE_ID`: Apple Developer email
+- `APPLE_APP_SPECIFIC_PASSWORD`: Apple app-specific password
+- `APPLE_TEAM_ID`: Apple Developer Team ID
+- `HOMEBREW_TAP_TOKEN`: token with write access to the Homebrew tap repo
+
+The release workflow uses the built-in `github.token` for GitHub Releases; no extra release PAT is needed unless you replace that token on purpose.
+
 ## Examples
 
 ```bash
