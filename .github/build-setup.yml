@@ -7,7 +7,8 @@
 # - MACOS_DEV_CERTIFICATE: Base64-encoded .p12 certificate
 # - MACOS_DEV_CERTIFICATE_PWD: Password used when exporting the .p12 file
 # - APPLE_ID: Apple Developer account email address
-# - APPLE_TEAM_ID: 10-character Apple Developer Team ID
+# - APPLE_TEAM_ID: 10-character Apple Developer Team ID (used as a fallback if
+#   the imported certificate does not expose its team ID)
 # - APPLE_APP_SPECIFIC_PASSWORD: App-specific password from appleid.apple.com
 #
 # This hook only imports the certificate for cargo-dist builds; the workflow
