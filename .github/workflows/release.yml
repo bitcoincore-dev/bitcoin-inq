@@ -305,6 +305,7 @@ jobs:
         run: |
           # Write and read notes from a file to avoid quoting breaking things
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
+          mapfile -t release_assets < <(find artifacts -type f | sort)
 
           if gh release view "${{ needs.plan.outputs.tag }}" >/dev/null 2>&1; then
             gh release edit "${{ needs.plan.outputs.tag }}" \
@@ -312,14 +313,14 @@ jobs:
               $PRERELEASE_FLAG \
               --title "$ANNOUNCEMENT_TITLE" \
               --notes-file "$RUNNER_TEMP/notes.txt"
-            gh release upload "${{ needs.plan.outputs.tag }}" artifacts/* --clobber
+            gh release upload "${{ needs.plan.outputs.tag }}" "${release_assets[@]}" --clobber
           else
             gh release create "${{ needs.plan.outputs.tag }}" \
               --target "$RELEASE_COMMIT" \
               $PRERELEASE_FLAG \
               --title "$ANNOUNCEMENT_TITLE" \
               --notes-file "$RUNNER_TEMP/notes.txt" \
-              artifacts/*
+              "${release_assets[@]}"
           fi
 
   publish-homebrew-formula:
