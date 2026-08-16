@@ -97,14 +97,31 @@ jobs:
               --password '${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}'
           fi
 
-          packaged_bin="$(find "${{ steps.locate.outputs.distrib }}" -type f -path "*/bitcoin-inq-${target_triple}/bitcoin-inq" -print -quit)"
-          if [ -z "$packaged_bin" ]; then
-            echo "::error title=Unable to locate packaged macOS binary::Could not find bitcoin-inq in the release tree for ${target_triple}"
+          tarball="$(find "${{ steps.locate.outputs.distrib }}" -maxdepth 1 -type f -name '*.tar.xz' -print -quit)"
+          if [ -z "$tarball" ]; then
+            echo "::error title=Unable to locate macOS release tarball::Could not find a tar.xz archive in the release tree for ${target_triple}"
             exit 1
           fi
 
-          cp "$bin" "$packaged_bin"
+          workdir="$(mktemp -d)"
+          tar -xJf "$tarball" -C "$workdir"
+          archive_root="$(find "$workdir" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          packaged_bin="$(find "$archive_root" -type f -path '*/bitcoin-inq' -print -quit)"
+          if [ -z "$archive_root" ] || [ -z "$packaged_bin" ]; then
+            echo "::error title=Unable to locate packaged macOS binary::Could not find bitcoin-inq inside $tarball"
+            rm -rf "$workdir"
+            exit 1
+          fi
+
+          cp -p "$bin" "$packaged_bin"
           codesign -v "$packaged_bin" --verbose
+
+          tar -cJf "$tarball" -C "$workdir" "$(basename "$archive_root")"
+          (
+            cd "${{ steps.locate.outputs.distrib }}"
+            shasum -a 256 "$(basename "$tarball")" > "$(basename "$tarball").sha256"
+          )
+          rm -rf "$workdir"
 
       - name: Upload signed artifacts
         uses: actions/upload-artifact@v4
