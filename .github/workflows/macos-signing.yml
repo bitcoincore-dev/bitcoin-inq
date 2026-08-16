@@ -86,10 +86,15 @@ jobs:
           codesign --force --options runtime --timestamp -s "$signing_identity" "$bin"
           codesign -v "$bin" --verbose
 
-          xcrun notarytool submit "$bin" --force --wait \
+          if ! xcrun notarytool submit "$bin" --force --wait \
             --apple-id '${{ secrets.APPLE_ID }}' \
             --password '${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}' \
-            --team-id "$team_id"
+            --team-id "$team_id"; then
+            echo "::warning title=Notarization team ID rejected::Retrying without --team-id"
+            xcrun notarytool submit "$bin" --force --wait \
+              --apple-id '${{ secrets.APPLE_ID }}' \
+              --password '${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}'
+          fi
 
           xcrun stapler staple "$bin"
       - name: Upload signed artifacts
