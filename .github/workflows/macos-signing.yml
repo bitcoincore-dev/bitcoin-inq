@@ -69,13 +69,26 @@ jobs:
           security import "$cert" -k ~/Library/Keychains/macos-build.keychain -P '${{ secrets.MACOS_DEV_CERTIFICATE_PWD }}' -T /usr/bin/codesign -T /usr/bin/productsign
           security set-key-partition-list -S apple-tool:,apple: -s -k actions macos-build.keychain
 
-          codesign --force --options runtime --timestamp -s 'Developer ID Application: Randy McMillan (M684FYCYG6)' "$bin"
+          signing_identity="$(security find-identity -v -p codesigning ~/Library/Keychains/macos-build.keychain | sed -nE 's/^[[:space:]]+[0-9]+\) [^"]+ "([^"]+)".*/\1/p' | head -n1)"
+          team_id="$(printf '%s\n' "$signing_identity" | sed -nE 's/.*\(([A-Z0-9]{10})\)$/\1/p')"
+          if [ -z "$team_id" ]; then
+            team_id='${{ secrets.APPLE_TEAM_ID }}'
+          fi
+          if [ -z "$signing_identity" ] || [ -z "$team_id" ]; then
+            echo "::error title=Unable to determine Apple signing identity::Imported certificate did not expose a Developer ID identity"
+            exit 1
+          fi
+
+          echo "Using signing identity: $signing_identity"
+          echo "Using Apple team ID: $team_id"
+
+          codesign --force --options runtime --timestamp -s "$signing_identity" "$bin"
           codesign -v "$bin" --verbose
 
           xcrun notarytool submit "$bin" --force --wait \
             --apple-id '${{ secrets.APPLE_ID }}' \
             --password '${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}' \
-            --team-id '${{ secrets.APPLE_TEAM_ID }}'
+            --team-id "$team_id"
 
           xcrun stapler staple "$bin"
       - name: Upload signed artifacts
