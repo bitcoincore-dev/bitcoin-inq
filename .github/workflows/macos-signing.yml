@@ -95,8 +95,6 @@ jobs:
               --apple-id '${{ secrets.APPLE_ID }}' \
               --password '${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}'
           fi
-
-          xcrun stapler staple "$bin"
       - name: Upload signed artifacts
         uses: actions/upload-artifact@v4
         with:
