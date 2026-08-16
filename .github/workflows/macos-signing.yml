@@ -58,6 +58,7 @@ jobs:
         run: |
           set -euo pipefail
           bin="${{ steps.locate.outputs.bin }}"
+          target_triple="${{ inputs.target-triple }}"
           cert="$RUNNER_TEMP/signcert.p12"
 
           printf '%s' '${{ secrets.MACOS_DEV_CERTIFICATE }}' | base64 --decode > "$cert"
@@ -95,6 +96,16 @@ jobs:
               --apple-id '${{ secrets.APPLE_ID }}' \
               --password '${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}'
           fi
+
+          packaged_bin="$(find "${{ steps.locate.outputs.distrib }}" -type f -path "*/bitcoin-inq-${target_triple}/bitcoin-inq" -print -quit)"
+          if [ -z "$packaged_bin" ]; then
+            echo "::error title=Unable to locate packaged macOS binary::Could not find bitcoin-inq in the release tree for ${target_triple}"
+            exit 1
+          fi
+
+          cp "$bin" "$packaged_bin"
+          codesign -v "$packaged_bin" --verbose
+
       - name: Upload signed artifacts
         uses: actions/upload-artifact@v4
         with:
